@@ -13,7 +13,7 @@
 
 <br />
 
-[**Download DVIDM**](installer/DVIDM-Setup.msi) &nbsp;·&nbsp;
+[**Download DVIDM**](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) &nbsp;·&nbsp;
 [English guide](docs/USER-GUIDE.pdf) &nbsp;·&nbsp;
 [راهنمای فارسی](docs/USER-GUIDE.fa.pdf) &nbsp;·&nbsp;
 [Extension video](docs/install%20extension%20guide.mp4)
@@ -52,7 +52,7 @@ The package includes a **Chrome / Edge extension** that sends selected links str
 
 | File | Description |
 |---|---|
-| [`installer/DVIDM-Setup.msi`](installer/DVIDM-Setup.msi) | Windows installer (64-bit, no administrator rights required) |
+| [`installer/DVIDM-Setup.msi`](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) | Windows installer (64-bit, no administrator rights required) — also attached to [Releases](https://github.com/davoodtaba-glitch/DVIDM/releases) |
 | [`extension/chrome-extension/`](extension/chrome-extension) | Unpacked Chrome / Edge extension |
 | [`extension/DVIDM-chrome-extension.zip`](extension/DVIDM-chrome-extension.zip) | Same extension as a zip archive |
 | [`docs/`](docs) | English and Persian guides, and the extension video |
