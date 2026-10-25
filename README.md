@@ -14,6 +14,7 @@
 <br />
 
 [**Download DVIDM**](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) &nbsp;·&nbsp;
+[Portable zip](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.29/DVIDM-Portable-0.5.29.zip) &nbsp;·&nbsp;
 [English guide](docs/USER-GUIDE.pdf) &nbsp;·&nbsp;
 [راهنمای فارسی](docs/USER-GUIDE.fa.pdf) &nbsp;·&nbsp;
 [Extension video](docs/install%20extension%20guide.mp4)
@@ -53,6 +54,7 @@ The package includes a **Chrome / Edge extension** that sends selected links str
 | File | Description |
 |---|---|
 | [`installer/DVIDM-Setup.msi`](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) | Windows installer (64-bit, no administrator rights required) — also attached to [Releases](https://github.com/davoodtaba-glitch/DVIDM/releases) |
+| [`portable/DVIDM-Portable-0.5.29.zip`](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.29/DVIDM-Portable-0.5.29.zip) | Portable build: extract and run, no installer |
 | [`extension/chrome-extension/`](extension/chrome-extension) | Unpacked Chrome / Edge extension |
 | [`extension/DVIDM-chrome-extension.zip`](extension/DVIDM-chrome-extension.zip) | Same extension as a zip archive |
 | [`docs/`](docs) | English and Persian guides, and the extension video |
@@ -65,6 +67,10 @@ The package includes a **Chrome / Edge extension** that sends selected links str
 4. On first launch, DVIDM saves to `Downloads` and uses `%TEMP%\DVIDM` for partial files. Both folders can be changed later in **Settings**.
 
 > Requires Windows 10 or Windows 11, 64-bit. The installer is per-user and installs to `%LOCALAPPDATA%\Programs\DVIDM`.
+
+### Portable version
+
+Prefer not to install anything? Download the **portable zip**, extract it to a writable folder, and run `DVIDM.exe`. Settings, the download catalog and the debug log stay in that folder, so it can be moved or deleted as one unit. On first run DVIDM enables start-with-Windows; turn it off in **Settings → Startup** for a setup that leaves no trace outside the folder.
 
 ---
 
@@ -80,6 +86,8 @@ The extension talks to the running app over a local connection (`127.0.0.1:52137
    %LOCALAPPDATA%\Programs\DVIDM\chrome-extension
    ```
 5. Pin the extension to the toolbar. Select links on a page and choose **Send selected links**, or use the right-click menu. Copied links can also be sent from DVIDM's **Clipboard** button.
+
+Portable build: choose the `chrome-extension` folder next to `DVIDM.exe` when loading the extension.
 
 <div align="center">
 

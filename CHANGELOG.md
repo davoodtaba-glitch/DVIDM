@@ -5,6 +5,7 @@
 - **User guide menu**: the DV logo menu now opens a guide dialog with the English PDF, the Persian PDF and the extension install video.
 - **Start with Windows by default**: new installs and existing settings that never made this choice enable the startup entry on first launch. The setting can still be turned off in **Settings → Startup**.
 - The installer now ships `install extension guide.mp4` alongside both PDF guides.
+- Added a **portable zip** with the same app, extension, guides and video — extract and run, no installation.
 
 ## Earlier highlights
 
