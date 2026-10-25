@@ -8,30 +8,50 @@ use std::time::Duration;
 
 pub(crate) struct ToastView {
     pal: Palette,
-    name: String,
+    title: String,
+    message: String,
+    icon: gpui_kit::assets::IconName,
+    tone: Hsla,
+    /// When set, clicking the card opens this link.
+    url: Option<String>,
 }
 
 impl ToastView {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         window: &mut Window,
         cx: &mut Context<Self>,
         pal: Palette,
-        name: String,
+        title: String,
+        message: String,
+        icon: gpui_kit::assets::IconName,
+        tone: Hsla,
+        url: Option<String>,
+        secs: u64,
     ) -> Self {
         cx.spawn_in(window, async move |_this, cx| {
             cx.background_executor()
-                .timer(Duration::from_secs(5))
+                .timer(Duration::from_secs(secs))
                 .await;
             cx.update(|window, _| window.remove_window()).ok();
         })
         .detach();
-        Self { pal, name }
+        Self {
+            pal,
+            title,
+            message,
+            icon,
+            tone,
+            url,
+        }
     }
 }
 
 impl Render for ToastView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let pal = self.pal;
+        let title = self.title.clone();
+        let message = self.message.clone();
         div()
             .id("toast-root")
             .size_full()
@@ -45,7 +65,10 @@ impl Render for ToastView {
             .py(px(12.))
             .cursor_pointer()
             // The whole message closes itself on click.
-            .on_mouse_down(MouseButton::Left, cx.listener(|_, _, window, _cx| {
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                if let Some(url) = this.url.clone() {
+                    crate::app::open_url_in_background(url, cx);
+                }
                 window.remove_window()
             }))
             .child(
@@ -53,15 +76,11 @@ impl Render for ToastView {
                     .size(px(32.))
                     .flex_shrink_0()
                     .rounded_full()
-                    .bg(with_alpha(pal.ok, 0.15))
+                    .bg(with_alpha(self.tone, 0.15))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(
-                        Icon::new(gpui_kit::assets::IconName::CircleCheck)
-                            .size(px(18.))
-                            .text_color(pal.ok),
-                    ),
+                    .child(Icon::new(self.icon).size(px(18.)).text_color(self.tone)),
             )
             .child(
                 div()
@@ -75,7 +94,7 @@ impl Render for ToastView {
                             .text_sm()
                             .font_semibold()
                             .text_color(pal.text)
-                            .child("Download complete"),
+                            .child(title),
                     )
                     .child(
                         div()
@@ -83,7 +102,7 @@ impl Render for ToastView {
                             .text_color(pal.muted)
                             .overflow_hidden()
                             .text_ellipsis()
-                            .child(self.name.clone()),
+                            .child(message),
                     ),
             )
     }

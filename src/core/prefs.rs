@@ -81,6 +81,12 @@ pub(crate) struct Prefs {
     pub(crate) sort_col: String,
     #[serde(default)]
     pub(crate) sort_desc: bool,
+    /// Unix seconds of the last update check (manual or background).
+    #[serde(default)]
+    pub(crate) last_update_check: u64,
+    /// Newest version already announced by the background check.
+    #[serde(default)]
+    pub(crate) update_notified: String,
 }
 pub(crate) fn prefs_path() -> PathBuf {
     std::env::current_exe()
@@ -114,6 +120,8 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
                 autostart_configured: p.autostart_configured,
                 sort_col: p.sort_col,
                 sort_desc: p.sort_desc,
+                last_update_check: p.last_update_check,
+                update_notified: p.update_notified,
             };
         }
     }
@@ -133,6 +141,8 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
         autostart_configured: false,
         sort_col: String::new(),
         sort_desc: false,
+        last_update_check: 0,
+        update_notified: String::new(),
     }
 }
 

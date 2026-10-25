@@ -73,6 +73,10 @@ pub(crate) enum Command {
     SetSort { col: String, desc: bool },
     /// Remember that the user chose the startup-with-Windows option.
     AutostartConfigured,
+    /// Timestamp of the last update check, persisted for the 2-day schedule.
+    SetLastUpdateCheck(u64),
+    /// Newest version the background check has already announced.
+    SetUpdateNotified(String),
     /// Drop a pending machine shutdown started by a list schedule.
     CancelShutdown,
     /// Stop every worker, persist progress and release the engine.

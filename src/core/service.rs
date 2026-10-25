@@ -488,6 +488,14 @@ impl DownloadService {
                 self.prefs.autostart_configured = true;
                 self.prefs.save();
             }
+            Command::SetLastUpdateCheck(secs) => {
+                self.prefs.last_update_check = secs;
+                self.prefs.save();
+            }
+            Command::SetUpdateNotified(version) => {
+                self.prefs.update_notified = version;
+                self.prefs.save();
+            }
             Command::CancelShutdown => {
                 if self.shutdown_at.take().is_some() {
                     events.push(Event::ShutdownAt(None));

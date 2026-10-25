@@ -168,6 +168,8 @@ pub(crate) struct MainView {
     pub(crate) toast_window: Option<AnyWindowHandle>,
     /// Logo menu (user guide, about, update, exit) is open.
     pub(crate) logo_menu: bool,
+    /// A manual or background update request is in flight.
+    pub(crate) update_checking: bool,
     /// Parallel-download cap being edited in the list options dialog.
     pub(crate) list_opts_cap: u32,
     /// Label colour being edited in the list options dialog.
@@ -266,6 +268,7 @@ impl MainView {
             notice: None,
             toast_window: None,
             logo_menu: false,
+            update_checking: false,
             list_opts_cap: 0,
             list_opts_color: 0,
             list_opts_shutdown: false,
@@ -282,6 +285,7 @@ impl MainView {
 
         view.watch_inputs(window, cx);
         view.start_tick_loop(cx);
+        view.start_update_loop(window, cx);
         view.start_tray_loop(cx);
         view.install_close_handler(window, cx);
         view
@@ -1799,65 +1803,83 @@ impl MainView {
     }
 
     fn check_for_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pal = self.pal;
-        window.open_dialog(cx, move |dialog, _window, _cx| {
-            dialog
-                .title("Check for updates")
-                .width(px(500.))
-                .child(update_dialog_body(
-                    gpui_kit::assets::IconName::LoaderCircle,
-                    pal.accent,
-                    "Checking for updates".to_string(),
-                    "Contacting GitHub for the latest release…".to_string(),
-                    pal,
-                ))
-                .footer(DialogFooter::new().child(
-                    Button::new("update-close")
-                        .outline()
-                        .label("Close")
-                        .on_click(|_, window, cx| window.close_dialog(cx)),
-                ))
-        });
-
+        if self.update_checking {
+            return;
+        }
+        self.update_checking = true;
         cx.spawn_in(window, async move |this, cx| {
             let result = smol::unblock(fetch_latest_release).await;
-            let state = match result {
-                Ok(rel) => {
-                    let latest = rel
-                        .tag_name
-                        .trim_start_matches(|c: char| c == 'v' || c == 'V')
-                        .to_string();
-                    crate::core::log::write(format!(
-                        "update check: local {} latest {}",
-                        env!("CARGO_PKG_VERSION"),
-                        rel.tag_name
-                    ));
-                    if version_newer(&latest, env!("CARGO_PKG_VERSION")) {
-                        let download = rel
-                            .assets
-                            .iter()
-                            .find(|a| a.name.to_ascii_lowercase().ends_with(".msi"))
-                            .map(|a| a.browser_download_url.clone());
-                        UpdateCheck::Available {
-                            version: latest,
-                            page: rel.html_url,
-                            download,
+            let state = update_state_from(result);
+            let now = crate::core::sys::now_secs();
+            cx.update(|window, cx| {
+                this.update(cx, |this, cx| {
+                    this.update_checking = false;
+                    this.svc.apply(Command::SetLastUpdateCheck(now));
+                    this.open_update_result(window, cx, state);
+                })
+                .ok();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Check twice a day and raise the in-app toast when a new version appears.
+    fn start_update_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| loop {
+            let wait = cx
+                .update(|_, cx| {
+                    this.update(cx, |this, _| update_due_in(this))
+                        .unwrap_or(UPDATE_CHECK_SECS)
+                })
+                .unwrap_or(UPDATE_CHECK_SECS);
+            cx.background_executor()
+                .timer(Duration::from_secs(wait))
+                .await;
+
+            let start = cx
+                .update(|_, cx| {
+                    this.update(cx, |this, _| {
+                        if this.update_checking {
+                            false
+                        } else {
+                            this.update_checking = true;
+                            true
                         }
-                    } else {
-                        UpdateCheck::UpToDate {
-                            latest,
-                            page: rel.html_url,
+                    })
+                    .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if !start {
+                continue;
+            }
+
+            let result = smol::unblock(fetch_latest_release).await;
+            let state = update_state_from(result);
+            let now = crate::core::sys::now_secs();
+            let available = match &state {
+                UpdateCheck::Available {
+                    version,
+                    page,
+                    download,
+                } => Some((
+                    version.clone(),
+                    download.clone().unwrap_or_else(|| page.clone()),
+                )),
+                _ => None,
+            };
+            cx.update(|_, cx| {
+                this.update(cx, |this, cx| {
+                    this.update_checking = false;
+                    this.svc.apply(Command::SetLastUpdateCheck(now));
+                    if let Some((version, url)) = available {
+                        if this.svc.prefs().update_notified != version {
+                            this.svc.apply(Command::SetUpdateNotified(version.clone()));
+                            this.show_update_toast(version, url, cx);
                         }
                     }
-                }
-                Err(err) => {
-                    crate::core::log::write(format!("update check failed: {err}"));
-                    UpdateCheck::Failed(err)
-                }
-            };
-            cx.update(|window, cx| {
-                this.update(cx, |this, cx| this.open_update_result(window, cx, state))
-                    .ok();
+                })
+                .ok();
             })
             .ok();
         })
@@ -2042,6 +2064,47 @@ impl MainView {
     /// Show the custom completion card in its own borderless, top-most window
     /// at the bottom-right of the primary display.
     fn show_toast(&mut self, name: String, cx: &mut Context<Self>) {
+        let pal = self.pal;
+        self.show_notification(
+            "Download complete".into(),
+            name,
+            gpui_kit::assets::IconName::CircleCheck,
+            pal.ok,
+            None,
+            5,
+            cx,
+        );
+    }
+
+    pub(crate) fn show_update_toast(
+        &mut self,
+        version: String,
+        url: String,
+        cx: &mut Context<Self>,
+    ) {
+        let pal = self.pal;
+        self.show_notification(
+            "Update available".into(),
+            format!("DVIDM {version} is ready. Click to download."),
+            gpui_kit::assets::IconName::CircleArrowUp,
+            pal.warn,
+            Some(url),
+            8,
+            cx,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_notification(
+        &mut self,
+        title: String,
+        message: String,
+        icon: gpui_kit::assets::IconName,
+        tone: Hsla,
+        url: Option<String>,
+        secs: u64,
+        cx: &mut Context<Self>,
+    ) {
         let previous = self.toast_window.take();
         let (x, y) = match cx.primary_display() {
             Some(display) => {
@@ -2077,8 +2140,23 @@ impl MainView {
                         .ok();
                 });
             }
+            let title_for_window = title.clone();
+            let message_for_window = message.clone();
+            let url_for_window = url.clone();
             match cx.open_window(options, |window, cx| {
-                cx.new(|cx| crate::toast::ToastView::new(window, cx, pal, name))
+                cx.new(|cx| {
+                    crate::toast::ToastView::new(
+                        window,
+                        cx,
+                        pal,
+                        title_for_window.clone(),
+                        message_for_window.clone(),
+                        icon,
+                        tone,
+                        url_for_window.clone(),
+                        secs,
+                    )
+                })
             }) {
                 Ok(handle) => {
                     this.update(cx, |this, _| this.toast_window = Some(handle.into()))
@@ -3192,6 +3270,57 @@ fn guide_row(
                 .text_color(pal.muted),
         )
         .into_any_element()
+}
+
+const UPDATE_CHECK_SECS: u64 = 2 * 24 * 60 * 60;
+
+/// Seconds until the next automatic check. A fresh install checks shortly
+/// after launch; afterwards every two days.
+fn update_due_in(view: &MainView) -> u64 {
+    let last = view.svc.prefs().last_update_check;
+    if last == 0 {
+        return 20;
+    }
+    last.saturating_add(UPDATE_CHECK_SECS)
+        .saturating_sub(crate::core::sys::now_secs())
+        .clamp(60, UPDATE_CHECK_SECS)
+}
+
+fn update_state_from(result: Result<GhRelease, String>) -> UpdateCheck {
+    match result {
+        Ok(release) => {
+            let latest = release
+                .tag_name
+                .trim_start_matches(|c: char| c == 'v' || c == 'V')
+                .to_string();
+            crate::core::log::write(format!(
+                "update check: local {} latest {}",
+                env!("CARGO_PKG_VERSION"),
+                release.tag_name
+            ));
+            if version_newer(&latest, env!("CARGO_PKG_VERSION")) {
+                let download = release
+                    .assets
+                    .iter()
+                    .find(|a| a.name.to_ascii_lowercase().ends_with(".msi"))
+                    .map(|a| a.browser_download_url.clone());
+                UpdateCheck::Available {
+                    version: latest,
+                    page: release.html_url,
+                    download,
+                }
+            } else {
+                UpdateCheck::UpToDate {
+                    latest,
+                    page: release.html_url,
+                }
+            }
+        }
+        Err(err) => {
+            crate::core::log::write(format!("update check failed: {err}"));
+            UpdateCheck::Failed(err)
+        }
+    }
 }
 
 const RELEASES_API: &str =

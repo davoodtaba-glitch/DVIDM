@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.31
+
+- Fixed the **Check for update** dialog getting stuck on “Checking…”. The request now runs silently and the result dialog opens when it arrives.
+- Added a **background update check every two days**. When a newer release exists, the app shows its desktop notification (once per version); clicking it opens the installer.
+- The last check time and the announced version are saved in settings.
+- Rebuilt installer and portable package for 0.5.31.
+
 ## 0.5.30
 
 - **Check for update now uses GitHub**: the logo menu asks the public release feed for the newest version, compares it with the running build, and shows either an up-to-date message or a download dialog with **Download installer** and **Release page** actions. Errors offer **Try again**.

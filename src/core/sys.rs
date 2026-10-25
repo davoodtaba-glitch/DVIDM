@@ -58,6 +58,14 @@ pub(crate) fn format_epoch_ms(ms: u64) -> String {
     )
 }
 
+/// Unix time in seconds, used to space update checks.
+pub(crate) fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Minutes since local midnight, for list schedule windows.
 pub(crate) fn local_minutes() -> u32 {
     unsafe {
