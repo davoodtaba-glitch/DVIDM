@@ -6,7 +6,7 @@
 
 **Fast, segmented downloads for Windows — with download lists, schedules, speed control and Chrome integration.**
 
-<img src="https://img.shields.io/badge/version-0.5.32-58a6ff?style=for-the-badge" alt="Version 0.5.32" />
+<img src="https://img.shields.io/badge/version-0.5.33-58a6ff?style=for-the-badge" alt="Version 0.5.33" />
 <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=for-the-badge" alt="Windows 10 and 11" />
 <img src="https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-4285F4?style=for-the-badge" alt="Chrome and Edge" />
 <img src="https://img.shields.io/badge/license-Freeware-12ec91?style=for-the-badge" alt="Freeware" />
@@ -14,7 +14,7 @@
 <br />
 
 [**Download DVIDM**](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) &nbsp;·&nbsp;
-[Portable zip](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.32/DVIDM-Portable-0.5.32.zip) &nbsp;·&nbsp;
+[Portable zip](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.33/DVIDM-Portable-0.5.33.zip) &nbsp;·&nbsp;
 [English guide](docs/USER-GUIDE.pdf) &nbsp;·&nbsp;
 [راهنمای فارسی](docs/USER-GUIDE.fa.pdf) &nbsp;·&nbsp;
 [Extension video](docs/install%20extension%20guide.mp4)
@@ -55,7 +55,7 @@ The package includes a **Chrome / Edge extension** that sends selected links str
 | File | Description |
 |---|---|
 | [`installer/DVIDM-Setup.msi`](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) | Windows installer (64-bit, no administrator rights required) — also attached to [Releases](https://github.com/davoodtaba-glitch/DVIDM/releases) |
-| [`portable/DVIDM-Portable-0.5.32.zip`](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.32/DVIDM-Portable-0.5.32.zip) | Portable build: extract and run, no installer |
+| [`portable/DVIDM-Portable-0.5.33.zip`](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.33/DVIDM-Portable-0.5.33.zip) | Portable build: extract and run, no installer |
 | [`extension/chrome-extension/`](extension/chrome-extension) | Unpacked Chrome / Edge extension |
 | [`extension/DVIDM-chrome-extension.zip`](extension/DVIDM-chrome-extension.zip) | Same extension as a zip archive |
 | [`docs/`](docs) | English and Persian guides, and the extension video |
@@ -136,7 +136,7 @@ Use **Settings → Apps → Installed apps → DV Internet Download Manager → 
 
 ## Version
 
-Current release: **0.5.32** — see [CHANGELOG.md](CHANGELOG.md) for user-facing changes.
+Current release: **0.5.33** — see [CHANGELOG.md](CHANGELOG.md) for user-facing changes.
 
 ---
 

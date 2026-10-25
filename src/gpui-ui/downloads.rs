@@ -457,7 +457,11 @@ fn row(
     pal: &Palette,
 ) -> AnyElement {
     let id = snap.id.clone();
-    let status_color = pal.status(snap.status);
+    let status_color = if scheduled && snap.status == Status::Paused {
+        pal.warn
+    } else {
+        pal.status(snap.status)
+    };
     let status_label = if scheduled && snap.status == Status::Paused {
         "Scheduled"
     } else if auto && snap.status == Status::Paused {

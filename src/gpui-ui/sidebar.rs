@@ -535,6 +535,97 @@ pub(crate) fn sidebar(
         .into_any_element()
 }
 
+/// Live schedule summary under the list options fields. It listens to the two
+/// clock inputs and to the schedule switch so the text follows every edit.
+struct SchedulePreview {
+    pal: Palette,
+    start: Entity<InputState>,
+    end: Entity<InputState>,
+    enabled: Entity<bool>,
+    _start_sub: Subscription,
+    _end_sub: Subscription,
+    _enabled_sub: Subscription,
+}
+
+impl SchedulePreview {
+    fn new(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        pal: Palette,
+        start: Entity<InputState>,
+        end: Entity<InputState>,
+        enabled: Entity<bool>,
+    ) -> Self {
+        let start_weak = cx.entity().downgrade();
+        let start_sub = window.subscribe(&start, cx, move |_, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                start_weak.update(cx, |_, cx| cx.notify()).ok();
+            }
+        });
+        let end_weak = cx.entity().downgrade();
+        let end_sub = window.subscribe(&end, cx, move |_, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                end_weak.update(cx, |_, cx| cx.notify()).ok();
+            }
+        });
+        let enabled_sub = cx.observe(&enabled, |_, _, cx| cx.notify());
+        Self {
+            pal,
+            start,
+            end,
+            enabled,
+            _start_sub: start_sub,
+            _end_sub: end_sub,
+            _enabled_sub: enabled_sub,
+        }
+    }
+
+    fn lines(&self, cx: &App) -> Option<(String, String)> {
+        let start = crate::core::schedule::parse_hm(self.start.read(cx).value().as_ref())?;
+        let end = crate::core::schedule::parse_hm(self.end.read(cx).value().as_ref())?;
+        let now = crate::core::sys::local_minutes();
+        Some((
+            format!(
+                "Downloads will start in {}.",
+                human_minutes(crate::core::schedule::until_window_open(now, start, end))
+            ),
+            format!(
+                "Downloads will run for {}.",
+                human_minutes(crate::core::schedule::window_len(start, end))
+            ),
+        ))
+    }
+}
+
+impl Render for SchedulePreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let pal = self.pal;
+        let enabled = *self.enabled.read(cx);
+        let body = if let Some((start_line, run_line)) = self.lines(cx) {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(div().text_xs().text_color(pal.muted).child(start_line))
+                .child(div().text_xs().text_color(pal.muted).child(run_line))
+                .into_any_element()
+        } else {
+            div()
+                .text_xs()
+                .text_color(pal.muted)
+                .child("Enter both times to preview the schedule.")
+                .into_any_element()
+        };
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .opacity(if enabled { 1.0 } else { 0.45 })
+            .child(body)
+            .into_any_element()
+    }
+}
+
 /// Minutes as natural-language units, with correct singular and plural forms.
 fn human_minutes(minutes: u32) -> String {
     let hours = minutes / 60;
@@ -877,6 +968,7 @@ impl MainView {
         self.list_opts_color = list.color;
         self.list_opts_shutdown = list.shutdown_at_end;
         self.list_opts_sched = list.sched_start.is_some() && list.sched_end.is_some();
+        let sched_signal = cx.new(|_| self.list_opts_sched);
         let shutdown_at_end = list.shutdown_at_end;
         let selecting = list.name.clone();
         let running = self
@@ -926,6 +1018,16 @@ impl MainView {
             watch_clock(&start, cx, window),
             watch_clock(&end, cx, window),
         ];
+        let preview = cx.new(|cx| {
+            SchedulePreview::new(
+                window,
+                cx,
+                pal,
+                start.clone(),
+                end.clone(),
+                sched_signal.clone(),
+            )
+        });
 
         let weak = cx.entity().downgrade();
         let cap_field_preset = cap_input.clone();
@@ -1038,12 +1140,17 @@ impl MainView {
                         .child(field_label("Time window", pal))
                         .child({
                             let weak_sched = weak.clone();
+                            let sched_signal_toggle = sched_signal.clone();
                             div()
                                 .flex()
                                 .flex_row()
                                 .items_center()
                                 .gap(px(10.))
                                 .child(toggle_switch("list-sched", sched_on, pal, move |on, cx| {
+                                    sched_signal_toggle.update(cx, |value, cx| {
+                                        *value = on;
+                                        cx.notify();
+                                    });
                                     weak_sched
                                         .update(cx, |this, cx| {
                                             this.list_opts_sched = on;
@@ -1125,6 +1232,7 @@ impl MainView {
                         .flex_row()
                         .items_center()
                         .gap(px(8.))
+                        .py(px(10.))
                         .child(
                             Button::new("list-export")
                                 .outline()
@@ -1159,6 +1267,14 @@ impl MainView {
                                     }
                                 }),
                         ),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .pt(px(14.))
+                        .border_t_1()
+                        .border_color(pal.line)
+                        .child(preview.clone()),
                 )
                 .footer(
                     DialogFooter::new()

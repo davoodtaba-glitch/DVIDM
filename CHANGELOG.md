@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.33
+
+- **List options now shows a live schedule preview** at the bottom: “Downloads will start in …” and “Downloads will run for …”. Both lines recalculate as the start or end time is typed, dim when the schedule is switched off, and use correct singular/plural units.
+- Added breathing room above and below the **Save list… / Load list…** buttons and a clearer gap under the divider.
+- Downloads held by a schedule now show a **yellow “Scheduled” badge**.
+- Rebuilt installer and portable package for 0.5.33.
+
 ## 0.5.32
 
 - The schedule tooltip on a list’s clock now reads **“Downloads will start in …”** and **“Downloads will run for …”**, with natural hour/minute wording and correct singular/plural units. The start time is calculated from the saved schedule and the current clock, and both values refresh when the schedule changes.
