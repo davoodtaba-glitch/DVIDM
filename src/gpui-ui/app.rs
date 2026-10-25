@@ -77,6 +77,35 @@ pub(crate) struct Notice {
     pub(crate) error: bool,
 }
 
+/// Result of the manual check against the GitHub release feed.
+#[derive(Clone)]
+pub(crate) enum UpdateCheck {
+    UpToDate {
+        latest: String,
+        page: String,
+    },
+    Available {
+        version: String,
+        page: String,
+        download: Option<String>,
+    },
+    Failed(String),
+}
+
+#[derive(serde::Deserialize)]
+struct GhRelease {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    assets: Vec<GhAsset>,
+}
+
+#[derive(serde::Deserialize)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
+}
+
 /// Rows a confirmed delete will remove, and whether their files go too.
 pub(crate) struct ConfirmDelete {
     pub(crate) ids: Vec<String>,
@@ -1774,34 +1803,194 @@ impl MainView {
         window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
                 .title("Check for updates")
-                .width(px(470.))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(pal.text)
-                                .child(format!(
-                                    "You are running DVIDM {}.",
-                                    env!("CARGO_PKG_VERSION")
-                                )),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(pal.muted)
-                                .child("This build has no update feed configured, so it cannot check for a newer version."),
-                        ),
-                )
+                .width(px(500.))
+                .child(update_dialog_body(
+                    gpui_kit::assets::IconName::LoaderCircle,
+                    pal.accent,
+                    "Checking for updates".to_string(),
+                    "Contacting GitHub for the latest release…".to_string(),
+                    pal,
+                ))
                 .footer(DialogFooter::new().child(
-                    Button::new("update-ok")
-                        .primary()
-                        .label("OK")
+                    Button::new("update-close")
+                        .outline()
+                        .label("Close")
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 ))
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = smol::unblock(fetch_latest_release).await;
+            let state = match result {
+                Ok(rel) => {
+                    let latest = rel
+                        .tag_name
+                        .trim_start_matches(|c: char| c == 'v' || c == 'V')
+                        .to_string();
+                    crate::core::log::write(format!(
+                        "update check: local {} latest {}",
+                        env!("CARGO_PKG_VERSION"),
+                        rel.tag_name
+                    ));
+                    if version_newer(&latest, env!("CARGO_PKG_VERSION")) {
+                        let download = rel
+                            .assets
+                            .iter()
+                            .find(|a| a.name.to_ascii_lowercase().ends_with(".msi"))
+                            .map(|a| a.browser_download_url.clone());
+                        UpdateCheck::Available {
+                            version: latest,
+                            page: rel.html_url,
+                            download,
+                        }
+                    } else {
+                        UpdateCheck::UpToDate {
+                            latest,
+                            page: rel.html_url,
+                        }
+                    }
+                }
+                Err(err) => {
+                    crate::core::log::write(format!("update check failed: {err}"));
+                    UpdateCheck::Failed(err)
+                }
+            };
+            cx.update(|window, cx| {
+                this.update(cx, |this, cx| this.open_update_result(window, cx, state))
+                    .ok();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn open_update_result(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        state: UpdateCheck,
+    ) {
+        let pal = self.pal;
+        let weak = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let current = env!("CARGO_PKG_VERSION");
+            let (icon, tone, title, detail) = match &state {
+                UpdateCheck::Available { version, download, .. } => (
+                    gpui_kit::assets::IconName::CircleArrowUp,
+                    pal.warn,
+                    format!("DVIDM {version} is available"),
+                    match download {
+                        Some(_) => format!(
+                            "You are running {current}. The new installer can be downloaded now."
+                        ),
+                        None => format!(
+                            "You are running {current}. Open the release page to download it."
+                        ),
+                    },
+                ),
+                UpdateCheck::UpToDate { latest, .. } => (
+                    gpui_kit::assets::IconName::CircleCheck,
+                    pal.ok,
+                    "You're up to date".to_string(),
+                    if latest.as_str() == current {
+                        format!("DVIDM {current} is the latest published release.")
+                    } else {
+                        format!(
+                            "You are running DVIDM {current}; the latest published release is {latest}."
+                        )
+                    },
+                ),
+                UpdateCheck::Failed(err) => (
+                    gpui_kit::assets::IconName::CircleAlert,
+                    pal.bad,
+                    "Could not check for updates".to_string(),
+                    short_error(err),
+                ),
+            };
+
+            let mut footer = DialogFooter::new();
+            match &state {
+                UpdateCheck::Available { page, download, .. } => {
+                    let page_url = page.clone();
+                    footer = footer.child(
+                        Button::new("update-page")
+                            .outline()
+                            .label("Release page")
+                            .on_click(move |_, window, cx| {
+                                open_url_in_background(page_url.clone(), cx);
+                                window.close_dialog(cx);
+                            }),
+                    );
+                    if let Some(url) = download {
+                        let url = url.clone();
+                        footer = footer.child(
+                            Button::new("update-get")
+                                .primary()
+                                .label("Download installer")
+                                .on_click(move |_, window, cx| {
+                                    open_url_in_background(url.clone(), cx);
+                                    window.close_dialog(cx);
+                                }),
+                        );
+                    } else {
+                        let url = page.clone();
+                        footer = footer.child(
+                            Button::new("update-get")
+                                .primary()
+                                .label("Open release page")
+                                .on_click(move |_, window, cx| {
+                                    open_url_in_background(url.clone(), cx);
+                                    window.close_dialog(cx);
+                                }),
+                        );
+                    }
+                }
+                UpdateCheck::UpToDate { page, .. } => {
+                    let page_url = page.clone();
+                    footer = footer
+                        .child(
+                            Button::new("update-notes")
+                                .outline()
+                                .label("Release notes")
+                                .on_click(move |_, window, cx| {
+                                    open_url_in_background(page_url.clone(), cx);
+                                    window.close_dialog(cx);
+                                }),
+                        )
+                        .child(
+                            Button::new("update-close")
+                                .primary()
+                                .label("Close")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        );
+                }
+                UpdateCheck::Failed(_) => {
+                    let weak_retry = weak.clone();
+                    footer = footer
+                        .child(
+                            Button::new("update-close")
+                                .outline()
+                                .label("Close")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("update-retry")
+                                .primary()
+                                .label("Try again")
+                                .on_click(move |_, window, cx| {
+                                    weak_retry
+                                        .update(cx, |this, cx| this.check_for_update(window, cx))
+                                        .ok();
+                                }),
+                        );
+                }
+            }
+
+            dialog
+                .title("Check for updates")
+                .width(px(500.))
+                .child(update_dialog_body(icon, tone, title, detail, pal))
+                .footer(footer)
         });
     }
 
@@ -2893,6 +3082,49 @@ fn logo_menu_item(
         .into_any_element()
 }
 
+fn update_dialog_body(
+    icon: gpui_kit::assets::IconName,
+    tone: Hsla,
+    title: String,
+    detail: String,
+    pal: Palette,
+) -> AnyElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_start()
+        .gap(px(12.))
+        .w_full()
+        .child(
+            div()
+                .flex()
+                .flex_shrink_0()
+                .items_center()
+                .justify_center()
+                .size(px(38.))
+                .rounded(px(10.))
+                .bg(with_alpha(tone, 0.12))
+                .child(Icon::new(icon).size(px(19.)).text_color(tone)),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(pal.text)
+                        .child(title),
+                )
+                .child(div().text_xs().text_color(pal.muted).child(detail)),
+        )
+        .into_any_element()
+}
+
 fn guide_row(
     id: &'static str,
     icon: gpui_kit::assets::IconName,
@@ -2960,6 +3192,79 @@ fn guide_row(
                 .text_color(pal.muted),
         )
         .into_any_element()
+}
+
+const RELEASES_API: &str =
+    "https://api.github.com/repos/davoodtaba-glitch/DVIDM/releases/latest";
+
+/// Newest published release, as advertised by GitHub.
+fn fetch_latest_release() -> Result<GhRelease, String> {
+    let request = ureq::get(RELEASES_API)
+        .set("Accept", "application/vnd.github+json")
+        .set("User-Agent", concat!("DVIDM/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(12));
+    let response = request.call().map_err(|err| match err {
+        ureq::Error::Status(code, _) => format!("GitHub returned HTTP {code}"),
+        ureq::Error::Transport(t) => format!("Network error: {t}"),
+    })?;
+    let text = response
+        .into_string()
+        .map_err(|e| format!("Could not read the GitHub response: {e}"))?;
+    serde_json::from_str::<GhRelease>(&text)
+        .map_err(|_| "Unexpected response from GitHub".to_string())
+}
+
+fn version_key(value: &str) -> Vec<u64> {
+    value
+        .trim()
+        .trim_start_matches(|c: char| c == 'v' || c == 'V')
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse().unwrap_or(0))
+        .collect()
+}
+
+fn version_newer(latest: &str, current: &str) -> bool {
+    let latest = version_key(latest);
+    let current = version_key(current);
+    for i in 0..latest.len().max(current.len()) {
+        let a = latest.get(i).copied().unwrap_or(0);
+        let b = current.get(i).copied().unwrap_or(0);
+        if a != b {
+            return a > b;
+        }
+    }
+    false
+}
+
+fn short_error(err: &str) -> String {
+    let line = err.lines().next().unwrap_or(err).trim();
+    let mut text: String = line.chars().take(180).collect();
+    if line.chars().count() > 180 {
+        text.push('…');
+    }
+    text
+}
+
+/// Open a release link in the default browser, off the UI thread.
+pub(crate) fn open_url_in_background(url: String, _cx: &mut App) {
+    if !url.starts_with("https://github.com/") {
+        crate::core::log::write(format!("refused non-GitHub url {url}"));
+        return;
+    }
+    std::thread::spawn(move || {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let outcome = match std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+        {
+            Ok(_) => "ok".to_string(),
+            Err(e) => format!("failed: {e}"),
+        };
+        crate::core::log::write(format!("open url {url} -> {outcome}"));
+    });
 }
 
 /// Shell-open a path off the UI thread; ShellExecute can pump messages and

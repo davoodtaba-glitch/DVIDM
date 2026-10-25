@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.30
+
+- **Check for update now uses GitHub**: the logo menu asks the public release feed for the newest version, compares it with the running build, and shows either an up-to-date message or a download dialog with **Download installer** and **Release page** actions. Errors offer **Try again**.
+- Rebuilt installer and portable package for 0.5.30.
+
 ## 0.5.29
 
 - **User guide menu**: the DV logo menu now opens a guide dialog with the English PDF, the Persian PDF and the extension install video.
