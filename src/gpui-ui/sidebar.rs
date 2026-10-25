@@ -145,10 +145,13 @@ pub(crate) fn sidebar(
             "No downloads in progress"
         };
         let sched_tip = if scheduled {
+            let start = list.sched_start.unwrap_or(0);
+            let end = list.sched_end.unwrap_or(0);
+            let now = crate::core::sys::local_minutes();
             format!(
-                "Scheduled {}–{}",
-                clock_label(list.sched_start.unwrap_or(0)),
-                clock_label(list.sched_end.unwrap_or(0))
+                "Downloads will start in {}.\nDownloads will run for {}.",
+                human_minutes(crate::core::schedule::until_window_open(now, start, end)),
+                human_minutes(crate::core::schedule::window_len(start, end))
             )
         } else {
             "No schedule set".to_string()
@@ -532,9 +535,24 @@ pub(crate) fn sidebar(
         .into_any_element()
 }
 
-/// Minutes since midnight as `HH:MM` for the schedule tooltip.
-fn clock_label(minutes: u32) -> String {
-    format!("{:02}:{:02}", (minutes / 60) % 24, minutes % 60)
+/// Minutes as natural-language units, with correct singular and plural forms.
+fn human_minutes(minutes: u32) -> String {
+    let hours = minutes / 60;
+    let mins = minutes % 60;
+    let mut parts = Vec::new();
+    if hours > 0 {
+        parts.push(format!(
+            "{hours} hour{}",
+            if hours == 1 { "" } else { "s" }
+        ));
+    }
+    if mins > 0 || hours == 0 {
+        parts.push(format!(
+            "{mins} minute{}",
+            if mins == 1 { "" } else { "s" }
+        ));
+    }
+    parts.join(" ")
 }
 
 /// Keep a clock field to four digits and place the colon: `0800` becomes

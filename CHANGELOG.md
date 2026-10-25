@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.32
+
+- The schedule tooltip on a list’s clock now reads **“Downloads will start in …”** and **“Downloads will run for …”**, with natural hour/minute wording and correct singular/plural units. The start time is calculated from the saved schedule and the current clock, and both values refresh when the schedule changes.
+- Rebuilt installer and portable package for 0.5.32.
+
 ## 0.5.31
 
 - Fixed the **Check for update** dialog getting stuck on “Checking…”. The request now runs silently and the result dialog opens when it arrives.
