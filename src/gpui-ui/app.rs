@@ -164,6 +164,12 @@ pub(crate) struct MainView {
     pub(crate) quitting: Arc<AtomicBool>,
     pub(crate) tray: Option<Tray>,
     pub(crate) notice: Option<Notice>,
+    /// Opacity of the bottom-right message card during its fade.
+    pub(crate) notice_alpha: f32,
+    /// Bumped on every new message, cancelling the previous fade task.
+    pub(crate) notice_serial: u64,
+    /// Download to bring into view on the next table render.
+    pub(crate) pending_focus: Option<String>,
     /// Current borderless completion toast window.
     pub(crate) toast_window: Option<AnyWindowHandle>,
     /// Logo menu (user guide, about, update, exit) is open.
@@ -192,7 +198,7 @@ pub(crate) struct MainView {
     /// Last observed native visibility; drives the tick rate.
     pub(crate) visible: bool,
     /// URL batches posted by the Chrome extension.
-    pub(crate) remote_rx: std::sync::mpsc::Receiver<Vec<String>>,
+    pub(crate) remote_rx: std::sync::mpsc::Receiver<crate::core::server::RemoteBatch>,
 }
 
 impl MainView {
@@ -266,6 +272,9 @@ impl MainView {
             quitting,
             tray,
             notice: None,
+            notice_alpha: 0.0,
+            notice_serial: 0,
+            pending_focus: None,
             toast_window: None,
             logo_menu: false,
             update_checking: false,
@@ -432,10 +441,7 @@ impl MainView {
         for event in events {
             match event {
                 Event::Error(message) => {
-                    self.notice = Some(Notice {
-                        text: message,
-                        error: true,
-                    });
+                    self.show_notice(message, true, cx);
                 }
                 Event::ShutdownMachine => {
                     crate::app::force_shutdown();
@@ -464,10 +470,10 @@ impl MainView {
                         .find(|s| s.id == id)
                         .map(|s| s.name.clone())
                         .unwrap_or_else(|| "download".into());
-                    self.notice = Some(Notice {
-                        text: format!("Added {name}"),
-                        error: false,
-                    });
+                    self.show_notice(format!("Added {name}"), false, cx);
+                    if self.svc.prefs().focus_new_download {
+                        self.pending_focus = Some(id);
+                    }
                     if self.page != Page::Downloads {
                         self.page = Page::Downloads;
                     }
@@ -487,17 +493,36 @@ impl MainView {
     /// Add URL batches sent by the browser extension.
     fn take_remote(&mut self, cx: &mut Context<Self>) {
         loop {
-            let Ok(urls) = self.remote_rx.try_recv() else {
+            let Ok(batch) = self.remote_rx.try_recv() else {
                 return;
             };
-            if urls.is_empty() {
+            if batch.urls.is_empty() {
                 continue;
             }
-            // Same review step as the egui build: nothing is queued until the
-            // user confirms the batch.
-            self.open_clip(urls, "Chrome", cx);
+            if batch.direct {
+                // Ctrl/Alt+click in the browser skips the review step. It
+                // still respects "Don't start immediately".
+                let dir = self.svc.save_dir();
+                let queued = self.svc.prefs().queued;
+                for url in batch.urls {
+                    let events = self.svc.apply(Command::Add {
+                        url,
+                        dir: dir.clone(),
+                        file_name: None,
+                        queued,
+                    });
+                    self.handle_events(events, cx);
+                }
+            } else {
+                // Same review step as the egui build: nothing is queued until
+                // the user confirms the batch.
+                self.open_clip(batch.urls, "Chrome", cx);
+            }
             self.page = Page::Downloads;
             self.list_filter = None;
+            // The window may have been hidden when the links arrived; make
+            // sure the new rows are painted without waiting for another tick.
+            cx.notify();
         }
     }
 
@@ -551,8 +576,61 @@ impl MainView {
         cx.notify();
     }
 
-    /// The message that floats over the window. Clicking anywhere outside the
-    /// card — on the dimmed backdrop — closes it.
+    /// Show a message in the bottom-right corner, fade it in, then hide it.
+    pub(crate) fn show_notice(&mut self, text: String, error: bool, cx: &mut Context<Self>) {
+        self.notice = Some(Notice { text, error });
+        self.notice_alpha = 0.0;
+        self.notice_serial = self.notice_serial.wrapping_add(1);
+        let serial = self.notice_serial;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            for step in 1..=8u32 {
+                cx.background_executor()
+                    .timer(Duration::from_millis(18))
+                    .await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.notice_serial == serial {
+                            this.notice_alpha = step as f32 / 8.0;
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            cx.background_executor()
+                .timer(Duration::from_millis(2600))
+                .await;
+            for step in (0..=10u32).rev() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(22))
+                    .await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.notice_serial == serial {
+                            this.notice_alpha = step as f32 / 10.0;
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            let _ = this.update(cx, |this, cx| {
+                if this.notice_serial == serial {
+                    this.notice = None;
+                    this.notice_alpha = 0.0;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The message card above the status bar; no scrim, no blocking of the UI.
     fn notice_overlay(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let pal = self.pal;
         let Some(notice) = &self.notice else {
@@ -566,85 +644,58 @@ impl MainView {
         } else {
             Icon::new(gpui_kit::assets::IconName::CircleCheck)
         };
-        let scrim = crate::theme::alpha(0x000000, if pal.dark { 0.42 } else { 0.20 });
-        let card = div()
-            .id("notice-card")
-            .w(px(420.))
-            .max_w_full()
-            .rounded(px(14.))
-            .bg(pal.card)
-            .border_1()
-            .border_color(with_alpha(tone, 0.42))
-            .shadow(vec![
-                BoxShadow::new(px(0.), px(12.), crate::theme::alpha(0x000000, 0.38))
-                    .blur_radius(px(24.))
-                    .spread_radius(px(-8.)),
-            ])
-            .px(px(16.))
-            .py(px(14.))
-            .flex()
-            .flex_row()
-            .items_start()
-            .gap(px(12.))
-            .cursor_pointer()
-            // Clicking the message itself also dismisses it.
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.notice = None;
-                cx.notify();
-                cx.stop_propagation();
-            }))
-            .child(
-                div()
-                    .size(px(32.))
-                    .flex_shrink_0()
-                    .rounded_full()
-                    .bg(with_alpha(tone, 0.16))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(icon.size(px(18.)).text_color(tone)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .text_color(pal.text)
-                            .child(if error { "Something went wrong" } else { "Done" }),
-                    )
-                    .child(div().text_sm().text_color(pal.muted).child(text)),
-            );
         div()
             .absolute()
-            .size_full()
+            .right(px(16.))
+            .bottom(px(46.))
+            .w(px(360.))
+            .opacity(self.notice_alpha)
             .child(
                 div()
-                    .id("notice-scrim")
-                    .absolute()
-                    .size_full()
-                    .bg(scrim)
+                    .id("notice-card")
+                    .rounded(px(12.))
+                    .bg(pal.card)
+                    .border_1()
+                    .border_color(with_alpha(tone, 0.42))
+                    .shadow(vec![
+                        BoxShadow::new(px(0.), px(10.), crate::theme::alpha(0x000000, 0.38))
+                            .blur_radius(px(22.))
+                            .spread_radius(px(-6.)),
+                    ])
+                    .px(px(14.))
+                    .py(px(12.))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.))
+                    .cursor_pointer()
+                    // Clicking the message dismisses it early.
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.notice = None;
+                        this.notice_alpha = 0.0;
+                        this.notice_serial = this.notice_serial.wrapping_add(1);
                         cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left_0()
-                    .right_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(card),
+                        cx.stop_propagation();
+                    }))
+                    .child(
+                        div()
+                            .size(px(28.))
+                            .flex_shrink_0()
+                            .rounded_full()
+                            .bg(with_alpha(tone, 0.16))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon.size(px(16.)).text_color(tone)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(pal.text)
+                            .child(text),
+                    ),
             )
             .into_any_element()
     }
@@ -838,10 +889,11 @@ impl MainView {
                     .on_click(cx.listener(|this, _, _, cx| {
                         let ids = this.action_ids();
                         if ids.is_empty() {
-                            this.notice = Some(Notice {
-                                text: "Nothing to delete in this view".into(),
-                                error: true,
-                            });
+                            this.show_notice(
+                                "Nothing to delete in this view".into(),
+                                true,
+                                cx,
+                            );
                         } else {
                             this.confirm_delete = Some(ConfirmDelete {
                                 ids,
@@ -1156,11 +1208,7 @@ impl MainView {
     pub(crate) fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let url = self.url.read(cx).value().trim().to_string();
         if url.is_empty() {
-            self.notice = Some(Notice {
-                text: "Paste an http(s) URL first".into(),
-                error: true,
-            });
-            cx.notify();
+            self.show_notice("Paste an http(s) URL first".into(), true, cx);
             return;
         }
         if let Some(existing) = self.svc.unfinished_duplicate(&url) {
@@ -1385,6 +1433,22 @@ impl MainView {
         ];
         if let Some(err) = snap.error.clone() {
             rows.push(("Error", err, false, pal.bad));
+        }
+        if snap.active_ms > 0 {
+            let seconds = (snap.active_ms as f64 / 1000.0).max(0.001);
+            let average = (snap.received as f64 / seconds) as u64;
+            rows.push((
+                "Download time",
+                crate::format::fmt_duration(snap.active_ms),
+                false,
+                pal.text,
+            ));
+            rows.push((
+                "Average speed",
+                crate::format::fmt_speed(average),
+                false,
+                pal.text,
+            ));
         }
 
         let weak = cx.entity().downgrade();
@@ -1932,7 +1996,11 @@ impl MainView {
 
             let mut footer = DialogFooter::new();
             match &state {
-                UpdateCheck::Available { page, download, .. } => {
+                UpdateCheck::Available {
+                    version,
+                    page,
+                    download,
+                } => {
                     let page_url = page.clone();
                     footer = footer.child(
                         Button::new("update-page")
@@ -1945,12 +2013,22 @@ impl MainView {
                     );
                     if let Some(url) = download {
                         let url = url.clone();
+                        let version = version.clone();
+                        let weak_download = weak.clone();
                         footer = footer.child(
                             Button::new("update-get")
                                 .primary()
                                 .label("Download installer")
                                 .on_click(move |_, window, cx| {
-                                    open_url_in_background(url.clone(), cx);
+                                    weak_download
+                                        .update(cx, |this, cx| {
+                                            this.add_update_download(
+                                                version.clone(),
+                                                url.clone(),
+                                                cx,
+                                            );
+                                        })
+                                        .ok();
                                     window.close_dialog(cx);
                                 }),
                         );
@@ -2076,6 +2154,25 @@ impl MainView {
         );
     }
 
+    /// Add the installer from the update check to DVIDM's downloads and
+    /// start it right away, instead of handing the link to the browser.
+    pub(crate) fn add_update_download(
+        &mut self,
+        version: String,
+        url: String,
+        cx: &mut Context<Self>,
+    ) {
+        let dir = self.svc.save_dir();
+        let events = self.svc.apply(Command::Add {
+            url,
+            dir,
+            file_name: Some(format!("DVIDM-Setup-{version}.msi")),
+            queued: false,
+        });
+        self.handle_events(events, cx);
+        cx.notify();
+    }
+
     pub(crate) fn show_update_toast(
         &mut self,
         version: String,
@@ -2083,12 +2180,17 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         let pal = self.pal;
+        let action = crate::toast::UpdateAction {
+            app: cx.entity().downgrade(),
+            version: version.clone(),
+            url,
+        };
         self.show_notification(
             "Update available".into(),
             format!("DVIDM {version} is ready. Click to download."),
             gpui_kit::assets::IconName::CircleArrowUp,
             pal.warn,
-            Some(url),
+            Some(action),
             8,
             cx,
         );
@@ -2101,7 +2203,7 @@ impl MainView {
         message: String,
         icon: gpui_kit::assets::IconName,
         tone: Hsla,
-        url: Option<String>,
+        action: Option<crate::toast::UpdateAction>,
         secs: u64,
         cx: &mut Context<Self>,
     ) {
@@ -2142,7 +2244,7 @@ impl MainView {
             }
             let title_for_window = title.clone();
             let message_for_window = message.clone();
-            let url_for_window = url.clone();
+            let action_for_window = action.clone();
             match cx.open_window(options, |window, cx| {
                 cx.new(|cx| {
                     crate::toast::ToastView::new(
@@ -2153,7 +2255,7 @@ impl MainView {
                         message_for_window.clone(),
                         icon,
                         tone,
-                        url_for_window.clone(),
+                        action_for_window.clone(),
                         secs,
                     )
                 })
@@ -2206,11 +2308,11 @@ impl MainView {
         }) {
             Ok((handle, _view)) => self.log_window = Some(handle),
             Err(err) => {
-                self.notice = Some(Notice {
-                    text: format!("Could not open the log window: {err:#}"),
-                    error: true,
-                });
-                cx.notify();
+                self.show_notice(
+                    format!("Could not open the log window: {err:#}"),
+                    true,
+                    cx,
+                );
             }
         }
     }
@@ -2232,20 +2334,13 @@ impl MainView {
 
     pub(crate) fn paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(text) = crate::clipboard::read_text() else {
-            self.notice = Some(Notice {
-                text: "Clipboard is empty or busy".into(),
-                error: true,
-            });
-            cx.notify();
+            self.show_notice("Clipboard is empty or busy".into(), true, cx);
             return;
         };
         let urls = crate::clipboard::extract_urls(&text);
         match urls.len() {
             0 => {
-                self.notice = Some(Notice {
-                    text: "No http(s) links in the clipboard".into(),
-                    error: true,
-                });
+                self.show_notice("No http(s) links in the clipboard".into(), true, cx);
             }
             1 => {
                 let url = urls.into_iter().next().unwrap();
@@ -2301,11 +2396,7 @@ impl MainView {
             .map(|i| i.url.clone())
             .collect();
         if urls.is_empty() {
-            self.notice = Some(Notice {
-                text: "No links selected".into(),
-                error: true,
-            });
-            cx.notify();
+            self.show_notice("No links selected".into(), true, cx);
             return;
         }
         let dir = self.svc.save_dir();
@@ -2335,16 +2426,10 @@ impl MainView {
                 });
             }
         }
-        self.notice = Some(match failures.last() {
-            Some(e) => Notice {
-                text: e.clone(),
-                error: true,
-            },
-            None => Notice {
-                text: format!("Added {} link(s)", added.len()),
-                error: false,
-            },
-        });
+        match failures.last() {
+            Some(e) => self.show_notice(e.clone(), true, cx),
+            None => self.show_notice(format!("Added {} link(s)", added.len()), false, cx),
+        }
         self.page = Page::Downloads;
         self.url
             .update(cx, |state, cx| state.set_value("", window, cx));
@@ -3235,11 +3320,11 @@ fn guide_row(
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "Guide file".into());
                 weak.update(cx, |this, cx| {
-                    this.notice = Some(Notice {
-                        text: format!("{name} was not found next to the application"),
-                        error: true,
-                    });
-                    cx.notify();
+                    this.show_notice(
+                        format!("{name} was not found next to the application"),
+                        true,
+                        cx,
+                    );
                 })
                 .ok();
             }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.35
+
+- **Chrome extension 0.2.8:** Ctrl+click or Alt+click a file link to add it to DVIDM and start it directly. Ordinary page links are untouched, Ctrl+Shift+click stays with Chrome, and “Don’t start immediately” is respected.
+- New downloads are scrolled into view automatically; turn this off in **Settings → Behavior**.
+- In-app messages moved to the bottom-right corner with a fade in/out and auto-hide; they no longer dim or block the window.
+- Download-complete and update-available desktop cards now fade in and out.
+- **Last date** now records the last start time (or the add time before the first start). The column stays brief and hovering shows the complete date and time.
+- **File Properties** adds **Download time** and **Average speed**; paused time is excluded from both.
+- **Download installer** in the update dialog now adds the MSI to DVIDM’s own downloads instead of opening the browser.
+- Rebuilt installer and portable package, with the extension files included for manual loading.
+
 ## 0.5.33
 
 - **List options now shows a live schedule preview** at the bottom: “Downloads will start in …” and “Downloads will run for …”. Both lines recalculate as the start or end time is typed, dim when the schedule is switched off, and use correct singular/plural units.

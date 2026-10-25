@@ -101,10 +101,7 @@ pub(crate) fn page(
                                         this.svc.apply(Command::AutostartConfigured);
                                     }
                                     Err(err) => {
-                                        this.notice = Some(crate::app::Notice {
-                                            text: err,
-                                            error: true,
-                                        });
+                                        this.show_notice(err, true, cx);
                                     }
                                 }
                                 cx.notify();
@@ -157,6 +154,40 @@ pub(crate) fn page(
                     .text_xs()
                     .text_color(pal.muted)
                     .child("A card appears at the bottom-right of the screen."),
+            ),
+    );
+
+    // Behavior -----------------------------------------------------------
+    let focus_new = prefs.focus_new_download;
+    body = body.child(
+        card("Behavior", pal)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(
+                        Switch::new("focus-new")
+                            .checked(focus_new)
+                            .on_change(cx.listener(|this, on: &bool, _, cx| {
+                                this.svc.apply(Command::SetFocusNewDownload(*on));
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(pal.text)
+                            .child("Scroll to a download when it is added"),
+                    ),
+            )
+            .child(
+                div()
+                    .mt(px(6.))
+                    .text_xs()
+                    .text_color(pal.muted)
+                    .child("Brings the new card into view, including links sent from the browser."),
             ),
     );
 

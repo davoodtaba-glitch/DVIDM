@@ -878,11 +878,11 @@ impl MainView {
             .map(|s| s.url.clone())
             .collect();
         if urls.is_empty() {
-            self.notice = Some(crate::app::Notice {
-                text: "This list has no unfinished downloads to save".into(),
-                error: true,
-            });
-            cx.notify();
+            self.show_notice(
+                "This list has no unfinished downloads to save".into(),
+                true,
+                cx,
+            );
             return;
         }
         let count = urls.len();
@@ -902,14 +902,11 @@ impl MainView {
             let result = std::fs::write(&path, text);
             let failed = result.is_err();
             this.update(cx, |this, cx| {
-                this.notice = Some(crate::app::Notice {
-                    text: match result {
-                        Ok(()) => format!("Saved {count} link(s) to {}", path.display()),
-                        Err(e) => format!("Could not save the list: {e}"),
-                    },
-                    error: failed,
-                });
-                cx.notify();
+                let text = match result {
+                    Ok(()) => format!("Saved {count} link(s) to {}", path.display()),
+                    Err(e) => format!("Could not save the list: {e}"),
+                };
+                this.show_notice(text, failed, cx);
             })
             .ok();
         })
@@ -938,10 +935,7 @@ impl MainView {
             urls.retain(|url| seen.insert(url.clone()));
             this.update(cx, |this, cx| {
                 if urls.is_empty() {
-                    this.notice = Some(crate::app::Notice {
-                        text: "No links found in the selected file(s)".into(),
-                        error: true,
-                    });
+                    this.show_notice("No links found in the selected file(s)".into(), true, cx);
                 } else {
                     this.clip_list = Some(name.clone());
                     this.open_clip(urls, "file", cx);

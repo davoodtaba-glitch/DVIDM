@@ -11,6 +11,7 @@ fn def_font() -> String { "Segoe UI".into() }
 fn def_theme_dark() -> bool { true }
 fn def_sidebar_width() -> u32 { 268 }
 fn def_notify_complete() -> bool { true }
+fn def_focus_new() -> bool { true }
 
 /// Upper bound for the global limit control: 1 GB/s.
 pub(crate) const MAX_LIMIT_KBPS: u64 = 1024 * 1024;
@@ -72,6 +73,9 @@ pub(crate) struct Prefs {
     /// Show the desktop card when a download finishes.
     #[serde(default = "def_notify_complete")]
     pub(crate) notify_complete: bool,
+    /// Scroll the download list to a newly added download.
+    #[serde(default = "def_focus_new")]
+    pub(crate) focus_new_download: bool,
     /// Whether the startup-with-Windows choice has been made. Older settings
     /// files lack it, so those enable autostart once on the next launch.
     #[serde(default)]
@@ -117,6 +121,7 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
                     .clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH),
                 temp_dir: p.temp_dir,
                 notify_complete: p.notify_complete,
+                focus_new_download: p.focus_new_download,
                 autostart_configured: p.autostart_configured,
                 sort_col: p.sort_col,
                 sort_desc: p.sort_desc,
@@ -138,6 +143,7 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
         sidebar_width: def_sidebar_width(),
         temp_dir: String::new(),
         notify_complete: def_notify_complete(),
+        focus_new_download: def_focus_new(),
         autostart_configured: false,
         sort_col: String::new(),
         sort_desc: false,

@@ -53,8 +53,8 @@ pub(crate) fn format_epoch_ms(ms: u64) -> String {
         }
     }
     format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        st.year, st.month, st.day, st.hour, st.minute
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        st.year, st.month, st.day, st.hour, st.minute, st.second
     )
 }
 

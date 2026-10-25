@@ -69,6 +69,8 @@ pub(crate) enum Command {
     SetSidebarWidth(u32),
     /// Show or silence the download-complete desktop notification.
     SetNotifyComplete(bool),
+    /// Scroll the download list to a newly added download.
+    SetFocusNewDownload(bool),
     /// Persist the table sort column (empty = unsorted) and direction.
     SetSort { col: String, desc: bool },
     /// Remember that the user chose the startup-with-Windows option.

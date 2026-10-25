@@ -49,6 +49,8 @@ use std::path::PathBuf;
             error: None,
             added: 0,
             finished: None,
+            started: None,
+            active_ms: 0,
             category,
             connections: 0,
             parts: Vec::new(),

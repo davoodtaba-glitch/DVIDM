@@ -47,3 +47,15 @@ pub(crate) fn fmt_bytes(n: u64) -> String {
 pub(crate) fn fmt_speed(n: u64) -> String {
     if n == 0 { "—".into() } else { format!("{}/s", fmt_bytes(n)) }
 }
+
+/// Active download time, excluding pauses.
+pub(crate) fn fmt_duration(ms: u64) -> String {
+    let secs = ms / 1000;
+    if secs >= 3600 {
+        format!("{}h {}m {}s", secs / 3600, (secs % 3600) / 60, secs % 60)
+    } else if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}

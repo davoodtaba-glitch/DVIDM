@@ -1,4 +1,5 @@
 //! Custom desktop notification shown in its own borderless, top-most window.
+use crate::app::MainView;
 use crate::theme::{with_alpha, Palette};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -6,14 +7,24 @@ use gpui_kit::component::StyledExt as _;
 use gpui_kit::component::Icon;
 use std::time::Duration;
 
+/// Clicking the notification adds the installer to DVIDM's own downloads.
+#[derive(Clone)]
+pub(crate) struct UpdateAction {
+    pub(crate) app: WeakEntity<MainView>,
+    pub(crate) version: String,
+    pub(crate) url: String,
+}
+
 pub(crate) struct ToastView {
     pal: Palette,
     title: String,
     message: String,
     icon: gpui_kit::assets::IconName,
     tone: Hsla,
-    /// When set, clicking the card opens this link.
-    url: Option<String>,
+    /// When set, clicking the card starts the installer download.
+    action: Option<UpdateAction>,
+    /// Fade progress, 0 = invisible, 1 = fully shown.
+    alpha: f32,
 }
 
 impl ToastView {
@@ -26,13 +37,36 @@ impl ToastView {
         message: String,
         icon: gpui_kit::assets::IconName,
         tone: Hsla,
-        url: Option<String>,
+        action: Option<UpdateAction>,
         secs: u64,
     ) -> Self {
-        cx.spawn_in(window, async move |_this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_secs(secs))
-                .await;
+        let hold = Duration::from_millis(secs.saturating_mul(1000).saturating_sub(400).max(200));
+        cx.spawn_in(window, async move |this, cx| {
+            for step in 1..=8u32 {
+                cx.background_executor()
+                    .timer(Duration::from_millis(18))
+                    .await;
+                let _ = cx.update(|_, cx| {
+                    this.update(cx, |this, cx| {
+                        this.alpha = step as f32 / 8.0;
+                        cx.notify();
+                    })
+                    .ok();
+                });
+            }
+            cx.background_executor().timer(hold).await;
+            for step in (0..=10u32).rev() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(22))
+                    .await;
+                let _ = cx.update(|_, cx| {
+                    this.update(cx, |this, cx| {
+                        this.alpha = step as f32 / 10.0;
+                        cx.notify();
+                    })
+                    .ok();
+                });
+            }
             cx.update(|window, _| window.remove_window()).ok();
         })
         .detach();
@@ -42,7 +76,8 @@ impl ToastView {
             message,
             icon,
             tone,
-            url,
+            action,
+            alpha: 0.0,
         }
     }
 }
@@ -66,11 +101,13 @@ impl Render for ToastView {
             .cursor_pointer()
             // The whole message closes itself on click.
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                if let Some(url) = this.url.clone() {
-                    crate::app::open_url_in_background(url, cx);
+                if let Some(UpdateAction { app, version, url }) = this.action.take() {
+                    app.update(cx, |this, cx| this.add_update_download(version, url, cx))
+                        .ok();
                 }
                 window.remove_window()
             }))
+            .opacity(self.alpha)
             .child(
                 div()
                     .size(px(32.))

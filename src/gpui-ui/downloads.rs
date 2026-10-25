@@ -8,7 +8,7 @@ use crate::theme::{with_alpha, Palette};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use gpui_kit::component::StyledExt as _;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::base::{Scrollbar, ScrollbarMode};
@@ -28,25 +28,31 @@ const PROGRESS_W: f32 = 58.0;
 const SPEED_W: f32 = 74.0;
 const ETA_W: f32 = 56.0;
 const PARTS_W: f32 = 36.0;
-const LAST_W: f32 = 92.0;
+const LAST_W: f32 = 108.0;
 const ACTIONS_W: f32 = 156.0;
 
 /// Finish time, falling back to the added time for pre-0.5.21 completed rows.
-fn last_download_ms(s: &Snapshot) -> u64 {
-    s.finished
-        .unwrap_or(if s.status == Status::Done { s.added } else { 0 })
+fn last_started_ms(s: &Snapshot) -> u64 {
+    // Not started yet: the add time is the best "last date" we have.
+    s.started.or(s.finished).unwrap_or(s.added)
 }
 
-fn last_download_text(s: &Snapshot) -> String {
-    let ms = last_download_ms(s);
+fn last_download_full(s: &Snapshot) -> String {
+    let ms = last_started_ms(s);
     if ms == 0 {
         "—".to_string()
     } else {
         crate::core::sys::format_epoch_ms(ms)
-            .split_whitespace()
-            .next()
-            .unwrap_or("—")
-            .to_string()
+    }
+}
+
+fn last_download_text(s: &Snapshot) -> String {
+    let ms = last_started_ms(s);
+    if ms == 0 {
+        "—".to_string()
+    } else {
+        let full = crate::core::sys::format_epoch_ms(ms);
+        full.get(5..16).unwrap_or(&full).to_string()
     }
 }
 
@@ -128,7 +134,7 @@ pub(crate) fn visible(view: &MainView) -> Vec<Snapshot> {
                 SortCol::Progress => progress_ratio(a).total_cmp(&progress_ratio(b)),
                 SortCol::Speed => a.speed.cmp(&b.speed),
                 SortCol::Eta => eta_seconds(a).total_cmp(&eta_seconds(b)),
-                SortCol::LastDate => last_download_ms(a).cmp(&last_download_ms(b)),
+                SortCol::LastDate => last_started_ms(a).cmp(&last_started_ms(b)),
             };
             if desc { ord.reverse() } else { ord }
         });
@@ -143,6 +149,14 @@ pub(crate) fn table(
 ) -> AnyElement {
     let pal = view.pal;
     let rows = visible(view);
+    // Bring a freshly added download into view, unless the user turned this
+    // off in Settings > Behavior.
+    if let Some(id) = view.pending_focus.take() {
+        if let Some(ix) = rows.iter().position(|s| s.id == id) {
+            view.row_scroll
+                .scroll_to_item(ix, ScrollStrategy::Nearest);
+        }
+    }
     let total_rows = view.svc.view().snaps.len();
     let all_selected = !rows.is_empty() && rows.iter().all(|s| view.selected.contains(&s.id));
     // Queue positions are stable across sorting.
@@ -813,11 +827,21 @@ fn row(
         .child(cell_text(SPEED_W, speed, pal.text))
         .child(cell_text(ETA_W, eta, pal.muted))
         .child(cell_text(PARTS_W, parts, pal.muted))
-        .child(cell_text(
-            LAST_W,
-            last_download_text(&snap),
-            pal.muted,
-        ))
+        .child({
+            let full = last_download_full(&snap);
+            div()
+                .w(px(LAST_W))
+                .flex_shrink_0()
+                .overflow_hidden()
+                .child(
+                    Button::new(ElementId::Name(format!("last-{id}").into()))
+                        .ghost()
+                        .compact()
+                        .label(last_download_text(&snap))
+                        .text_color(pal.muted)
+                        .tooltip(full),
+                )
+        })
         .child(
             div()
                 .w(px(ACTIONS_W))

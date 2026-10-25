@@ -12,6 +12,11 @@ Sends links and pages to **DV Internet Download Manager** over a localhost-only 
 
 ## Usage
 
+- **Ctrl+click or Alt+click a file link** (common download extensions such as
+  `.zip`, `.rar`, `.exe`, `.msi`, `.iso`, `.pdf`, `.mp4`, or any link with a
+  `download` attribute) to add it to DVIDM and start downloading immediately.
+  Normal page links are left alone, so Ctrl+click still opens a new tab.
+  Ctrl+Shift+click keeps Chrome's native behavior.
 - **Right-click a link** → “Download link with DVIDM”.
 - **Select text/links on a page**, right-click → “Send selected links to DVIDM”.
   All links inside the selection (anchors and plain URLs) are collected.
@@ -24,9 +29,10 @@ Sends links and pages to **DV Internet Download Manager** over a localhost-only 
     one URL per line.
 - The badge shows `OK` (green), `!` (red) or `0` (no selected links).
 
-**Links are not added directly.** DVIDM opens the same review window used by
-“Get from clipboard” (titled **From Chrome**), where you can uncheck items, pick a
-destination list and press **Add**.
+**Links sent from menus and the popup are not added directly.** DVIDM opens the
+same review window used by “Get from clipboard” (titled **From Chrome**), where
+you can uncheck items, pick a destination list and press **Add**. Only the
+Ctrl/Alt+click shortcut uses the direct path.
 
 ## How it works
 
@@ -35,7 +41,7 @@ DVIDM listens on `http://127.0.0.1:52137`:
 | Method | Path    | Notes |
 |--------|---------|-------|
 | GET    | `/ping` | Returns `DVIDM` when the app is running |
-| POST   | `/add`  | JSON `{"urls":["https://...", ...]}` plus header `X-DVIDM: chrome` (`{"url":"..."}` is also accepted) |
+| POST   | `/add`  | JSON `{"urls":["https://...", ...], "direct":false}` plus header `X-DVIDM: chrome` (`{"url":"..."}` is also accepted). `"direct": true` skips the review window and starts the downloads. |
 
 Only `chrome-extension://` origins are accepted for cross-origin requests; requests
 without an `Origin` header (local tools like curl) are also allowed. Nothing leaves

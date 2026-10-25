@@ -479,6 +479,10 @@ impl DownloadService {
                 self.prefs.notify_complete = on;
                 self.prefs.save();
             }
+            Command::SetFocusNewDownload(on) => {
+                self.prefs.focus_new_download = on;
+                self.prefs.save();
+            }
             Command::SetSort { col, desc } => {
                 self.prefs.sort_col = col;
                 self.prefs.sort_desc = desc;

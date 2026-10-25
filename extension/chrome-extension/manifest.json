@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
   "name": "DVIDM Link Helper",
-  "version": "0.2.7",
-  "description": "Send links and pages to DV Internet Download Manager.",
+  "version": "0.2.8",
+  "description": "Send links and pages to DV Internet Download Manager. Ctrl/Alt+click a file to download it.",
   "permissions": ["contextMenus", "activeTab", "scripting", "clipboardWrite", "offscreen"],
   "host_permissions": ["http://127.0.0.1:52137/*"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
   "background": {
     "service_worker": "background.js"
   },

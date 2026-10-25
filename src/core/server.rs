@@ -11,7 +11,17 @@ use std::time::Duration;
 
 pub(crate) const PORT: u16 = 52137;
 
-pub(crate) fn start(tx: Sender<Vec<String>>, wake: Arc<dyn Fn() + Send + Sync>) {
+/// A batch of links from the browser, and whether the user asked for an
+/// immediate download instead of the review window.
+pub(crate) struct RemoteBatch {
+    pub(crate) urls: Vec<String>,
+    pub(crate) direct: bool,
+}
+
+pub(crate) fn start(
+    tx: Sender<RemoteBatch>,
+    wake: Arc<dyn Fn() + Send + Sync>,
+) {
     std::thread::spawn(move || {
         let Ok(listener) = TcpListener::bind(("127.0.0.1", PORT)) else {
             return;
@@ -24,7 +34,11 @@ pub(crate) fn start(tx: Sender<Vec<String>>, wake: Arc<dyn Fn() + Send + Sync>) 
     });
 }
 
-fn handle(mut stream: TcpStream, tx: Sender<Vec<String>>, wake: Arc<dyn Fn() + Send + Sync>) {
+fn handle(
+    mut stream: TcpStream,
+    tx: Sender<RemoteBatch>,
+    wake: Arc<dyn Fn() + Send + Sync>,
+) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
     let Ok(reader_stream) = stream.try_clone() else {
@@ -103,6 +117,11 @@ fn handle(mut stream: TcpStream, tx: Sender<Vec<String>>, wake: Arc<dyn Fn() + S
             return;
         }
         let value = serde_json::from_slice::<serde_json::Value>(&body).ok();
+        let direct = value
+            .as_ref()
+            .and_then(|v| v.get("direct"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let mut urls: Vec<String> = Vec::new();
         if let Some(value) = value {
             if let Some(list) = value.get("urls").and_then(|v| v.as_array()) {
@@ -134,7 +153,13 @@ fn handle(mut stream: TcpStream, tx: Sender<Vec<String>>, wake: Arc<dyn Fn() + S
         // The UI may be idle while hidden in the tray, so surface it from here;
         // the UI's next tick picks the batch up.
         wake();
-        if tx.send(urls).is_err() {
+        if tx
+            .send(RemoteBatch {
+                urls,
+                direct,
+            })
+            .is_err()
+        {
             respond(&mut stream, 500, "App closed", "text/plain", &cors(&origin));
             return;
         }

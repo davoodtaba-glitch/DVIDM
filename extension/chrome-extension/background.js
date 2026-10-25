@@ -38,6 +38,15 @@ chrome.contextMenus.onClicked.addListener((info) => {
   if (url) sendToDvidm([url]);
 });
 
+// Ctrl/Alt+click on a file link: add it straight to DVIDM, no review window.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || message.type !== "dvidm-direct" || typeof message.url !== "string") {
+    return false;
+  }
+  sendToDvidm([message.url], true).then((ok) => sendResponse({ ok }));
+  return true;
+});
+
 function collectForSelection(info) {
   collectSelectedUrls(info, (urls, error) => {
     if (urls.length) sendToDvidm(urls);
@@ -119,11 +128,11 @@ async function copyToClipboard(text) {
   return false;
 }
 
-async function sendToDvidm(urls) {
+async function sendToDvidm(urls, direct = false) {
   const unique = [...new Set(urls.filter((u) => /^https?:\/\//i.test(u)))];
   if (!unique.length) {
     showBadge("0", "#f59e0b");
-    return;
+    return false;
   }
   try {
     const res = await fetch(`${API}/add`, {
@@ -132,12 +141,14 @@ async function sendToDvidm(urls) {
         "Content-Type": "application/json",
         "X-DVIDM": "chrome"
       },
-      body: JSON.stringify({ urls: unique })
+      body: JSON.stringify({ urls: unique, direct })
     });
     if (!res.ok) throw new Error(await res.text());
     showBadge(String(unique.length), "#22c55e");
+    return true;
   } catch (err) {
     showBadge("!", "#ef4444");
+    return false;
   }
 }
 
