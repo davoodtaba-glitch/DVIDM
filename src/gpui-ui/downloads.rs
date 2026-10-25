@@ -1,0 +1,973 @@
+//! The download table: virtualized rows, status badges, column sorting and the
+//! segmented progress bar that shows each connection's own slice.
+use crate::app::{MainView, SortCol};
+use crate::core::Command;
+use crate::engine::{Category, Snapshot, Status};
+use crate::format::{eta_text, fmt_speed, size_text};
+use crate::theme::{with_alpha, Palette};
+use gpui_kit::prelude::*;
+use gpui_kit::*;
+use gpui_kit::component::StyledExt as _;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::{Icon, IconName};
+use gpui_kit::base::{Scrollbar, ScrollbarMode};
+use std::collections::HashSet;
+
+/// Row height including the gap below it; uniform_list needs one height.
+const ROW_H: f32 = 70.0;
+/// Space kept clear under every card, so rows read as separate cards.
+const ROW_GAP: f32 = 10.0;
+
+// Column widths. The file column takes whatever is left.
+const NUM_W: f32 = 34.0;
+const STATUS_W: f32 = 92.0;
+const LISTS_W: f32 = 36.0;
+const SIZE_W: f32 = 116.0;
+const PROGRESS_W: f32 = 58.0;
+const SPEED_W: f32 = 74.0;
+const ETA_W: f32 = 56.0;
+const PARTS_W: f32 = 36.0;
+const LAST_W: f32 = 92.0;
+const ACTIONS_W: f32 = 156.0;
+
+/// Finish time, falling back to the added time for pre-0.5.21 completed rows.
+fn last_download_ms(s: &Snapshot) -> u64 {
+    s.finished
+        .unwrap_or(if s.status == Status::Done { s.added } else { 0 })
+}
+
+fn last_download_text(s: &Snapshot) -> String {
+    let ms = last_download_ms(s);
+    if ms == 0 {
+        "—".to_string()
+    } else {
+        crate::core::sys::format_epoch_ms(ms)
+            .split_whitespace()
+            .next()
+            .unwrap_or("—")
+            .to_string()
+    }
+}
+
+/// Update one row's selection and report whether it changed.
+fn set_selected(selected: &mut HashSet<String>, id: &str, on: bool) -> bool {
+    if on {
+        selected.insert(id.to_string())
+    } else {
+        selected.remove(id)
+    }
+}
+
+fn progress_ratio(s: &Snapshot) -> f64 {
+    s.total
+        .filter(|t| *t > 0)
+        .map(|t| s.received as f64 / t as f64)
+        .unwrap_or(0.0)
+}
+
+/// Sort order for the Status column: running first, finished last.
+fn status_rank(status: Status) -> u8 {
+    match status {
+        Status::Connecting => 0,
+        Status::Downloading => 1,
+        Status::Paused => 2,
+        Status::Failed => 3,
+        Status::Done => 4,
+    }
+}
+
+fn eta_seconds(s: &Snapshot) -> f64 {
+    match s.total {
+        Some(t) if s.speed > 0 => (t.saturating_sub(s.received) as f64) / s.speed as f64,
+        _ => f64::MAX,
+    }
+}
+
+pub(crate) fn in_view(listed: Option<&HashSet<String>>, filter: Category, s: &Snapshot) -> bool {
+    match listed {
+        Some(ids) => ids.contains(&s.id),
+        None => match filter {
+            Category::All => true,
+            Category::Active => matches!(
+                s.status,
+                Status::Connecting | Status::Downloading | Status::Paused | Status::Failed
+            ),
+            Category::Done => s.status == Status::Done,
+            other => s.category == other,
+        },
+    }
+}
+
+/// Rows the table shows after the category/list filter, search and sort.
+pub(crate) fn visible(view: &MainView) -> Vec<Snapshot> {
+    let query = view.search_query.trim().to_lowercase();
+    let listed: Option<HashSet<String>> = view.list_filter.as_ref().and_then(|name| {
+        view.svc
+            .lists()
+            .iter()
+            .find(|l| &l.name == name)
+            .map(|l| l.items.iter().cloned().collect())
+    });
+    let mut rows: Vec<Snapshot> = view
+        .svc
+        .view()
+        .snaps
+        .iter()
+        .filter(|s| in_view(listed.as_ref(), view.filter, s))
+        .filter(|s| query.is_empty() || s.name.to_lowercase().contains(&query))
+        .cloned()
+        .collect();
+    if let Some((col, desc)) = view.sort {
+        rows.sort_by(|a, b| {
+            let ord = match col {
+                SortCol::Num => a.order.cmp(&b.order),
+                SortCol::Status => status_rank(a.status).cmp(&status_rank(b.status)),
+                SortCol::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortCol::Size => a.total.unwrap_or(0).cmp(&b.total.unwrap_or(0)),
+                SortCol::Progress => progress_ratio(a).total_cmp(&progress_ratio(b)),
+                SortCol::Speed => a.speed.cmp(&b.speed),
+                SortCol::Eta => eta_seconds(a).total_cmp(&eta_seconds(b)),
+                SortCol::LastDate => last_download_ms(a).cmp(&last_download_ms(b)),
+            };
+            if desc { ord.reverse() } else { ord }
+        });
+    }
+    rows
+}
+
+pub(crate) fn table(
+    view: &mut MainView,
+    _window: &mut Window,
+    cx: &mut Context<MainView>,
+) -> AnyElement {
+    let pal = view.pal;
+    let rows = visible(view);
+    let total_rows = view.svc.view().snaps.len();
+    let all_selected = !rows.is_empty() && rows.iter().all(|s| view.selected.contains(&s.id));
+    // Queue positions are stable across sorting.
+    let numbers: std::collections::HashMap<String, usize> = view
+        .svc
+        .view()
+        .snaps
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.clone(), i + 1))
+        .collect();
+    let list_dots: Vec<(String, Hsla)> = view
+        .svc
+        .lists()
+        .iter()
+        .map(|l| (l.name.clone(), pal.list_color(l.color)))
+        .collect();
+    let mut badge_map: std::collections::HashMap<String, Vec<Hsla>> =
+        std::collections::HashMap::new();
+    for list in view.svc.lists() {
+        let color = pal.list_color(list.color);
+        for id in &list.items {
+            badge_map.entry(id.clone()).or_default().push(color);
+        }
+    }
+    let auto_queued = view.svc.auto_queued_ids();
+    let scheduled = view.svc.scheduled_ids();
+
+    let header = header_row(view, &rows, all_selected, cx);
+    let weak = cx.entity().downgrade();
+
+    if rows.is_empty() {
+        let (title, hint) = if total_rows == 0 {
+            ("No downloads", "Paste a link above and press Download.")
+        } else {
+            ("Nothing matches", "Try another category or clear the search.")
+        };
+        return div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .child(header)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(6.))
+                    .flex_1()
+                    .child(div().text_lg().font_semibold().text_color(pal.text).child(title))
+                    .child(div().text_sm().text_color(pal.muted).child(hint)),
+            )
+            .into_any_element();
+    }
+
+    struct Row {
+        snap: Snapshot,
+        num: usize,
+        selected: bool,
+        auto: bool,
+        scheduled: bool,
+        dots: Vec<Hsla>,
+    }
+    let row_data: Vec<Row> = rows
+        .iter()
+        .map(|s| Row {
+            snap: s.clone(),
+            num: numbers.get(&s.id).copied().unwrap_or(0),
+            selected: view.selected.contains(&s.id),
+            auto: auto_queued.contains(&s.id),
+            scheduled: scheduled.contains(&s.id),
+            dots: badge_map.get(&s.id).cloned().unwrap_or_default(),
+        })
+        .collect();
+    let _ = list_dots;
+    let count = row_data.len();
+    let dark = pal.dark;
+    let selected_count = view.selected.len();
+    let scroll = view.row_scroll.clone();
+
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .min_w_0()
+        .w_full()
+        .child(header)
+        .child(
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .min_h_0()
+                .min_w_0()
+                .child(
+                    uniform_list("download-rows", count, move |range, _window, _cx| {
+                let pal = Palette::new(dark);
+                range
+                    .map(|ix| {
+                        let r = &row_data[ix];
+                        row(
+                            weak.clone(),
+                            r.snap.clone(),
+                            r.num,
+                            r.selected,
+                            r.auto,
+                            r.scheduled,
+                            r.dots.clone(),
+                            &pal,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .track_scroll(&scroll)
+            .flex_1()
+            .w_full()
+            .min_h_0()
+            .min_w_0()
+            .px(px(12.))
+            .pt(px(6.)),
+                )
+                // Always-visible scrollbar for long lists; it sits over the
+                // right edge of the table without widening the rows.
+                .child(
+                    Scrollbar::vertical(&RowScroll::new(scroll.clone()))
+                        .mode(ScrollbarMode::Always),
+                ),
+        )
+        .when(selected_count > 0, |d| {
+            d.child(
+                div()
+                    .h(px(26.))
+                    .px(px(20.))
+                    .text_xs()
+                    .text_color(pal.muted)
+                    .child(format!("{selected_count} selected")),
+            )
+        })
+        .into_any_element()
+}
+
+fn header_row(
+    view: &mut MainView,
+    rows: &[Snapshot],
+    all_selected: bool,
+    cx: &mut Context<MainView>,
+) -> AnyElement {
+    let pal = view.pal;
+    let weak = cx.entity().downgrade();
+    let ids: Vec<String> = rows.iter().map(|s| s.id.clone()).collect();
+    let sort = view.sort;
+
+    div()
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.))
+        .h(px(34.))
+        .px(px(16.))
+        .border_b_1()
+        .border_color(pal.line)
+        .text_xs()
+        .text_color(pal.muted)
+        .child(
+            Checkbox::new("select-all")
+                .checked(all_selected)
+                .on_click({
+                    let weak = weak.clone();
+                    move |on: &bool, _, cx: &mut App| {
+                        let ids = ids.clone();
+                        let on = *on;
+                        weak.update(cx, |this, cx| {
+                            for id in &ids {
+                                if on {
+                                    this.selected.insert(id.clone());
+                                } else {
+                                    this.selected.remove(id);
+                                }
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                }),
+        )
+        .child(sort_label("#", SortCol::Num, sort, weak.clone(), pal, false))
+        .child(sort_label(
+            "Status",
+            SortCol::Status,
+            sort,
+            weak.clone(),
+            pal,
+            false,
+        ))
+        .child(cell(LISTS_W, "Lists"))
+        .child(sort_label(
+            "File name",
+            SortCol::Name,
+            sort,
+            weak.clone(),
+            pal,
+            true,
+        ))
+        .child(sort_label("Size", SortCol::Size, sort, weak.clone(), pal, false))
+        .child(sort_label(
+            "Progress",
+            SortCol::Progress,
+            sort,
+            weak.clone(),
+            pal,
+            false,
+        ))
+        .child(sort_label(
+            "Speed",
+            SortCol::Speed,
+            sort,
+            weak.clone(),
+            pal,
+            false,
+        ))
+        .child(sort_label("ETA", SortCol::Eta, sort, weak.clone(), pal, false))
+        .child(cell(PARTS_W, "Parts"))
+        .child(sort_label(
+            "Last date",
+            SortCol::LastDate,
+            sort,
+            weak,
+            pal,
+            false,
+        ))
+        .child(cell(ACTIONS_W, "Actions"))
+        .into_any_element()
+}
+
+fn cell(width: f32, label: &str) -> AnyElement {
+    div()
+        .w(px(width))
+        .flex_shrink_0()
+        .child(label.to_string())
+        .into_any_element()
+}
+
+fn sort_label(
+    label: &str,
+    col: SortCol,
+    sort: Option<(SortCol, bool)>,
+    weak: WeakEntity<MainView>,
+    pal: Palette,
+    grow: bool,
+) -> AnyElement {
+    let active = sort.map(|(c, _)| c) == Some(col);
+    let desc = sort.map_or(false, |(c, d)| c == col && d);
+    let el = div()
+        .id(ElementId::Name(format!("sort-{label}").into()))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(4.))
+        .h_full()
+        .cursor_pointer()
+        .text_color(if active { pal.text } else { pal.muted })
+        .on_click(move |_, _, cx: &mut App| {
+            weak.update(cx, |this, cx| this.set_sort(col, cx)).ok();
+        })
+        .child(label.to_string())
+        // Every sortable column carries its triangle, dim until it is used.
+        .child(
+            Icon::new(if desc {
+                IconName::ArrowDown
+            } else {
+                IconName::ArrowUp
+            })
+            .size(px(9.))
+            .text_color(if active {
+                pal.accent
+            } else {
+                with_alpha(pal.muted, 0.45)
+            }),
+        );
+    if grow {
+        el.w_full()
+    } else {
+        let w = match label {
+            "Status" => STATUS_W,
+            "Size" => SIZE_W,
+            "Progress" => PROGRESS_W,
+            "Speed" => SPEED_W,
+            "ETA" => ETA_W,
+            "Last date" => LAST_W,
+            _ => NUM_W,
+        };
+        el.w(px(w)).flex_shrink_0()
+    }
+    .into_any_element()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn row(
+    weak: WeakEntity<MainView>,
+    snap: Snapshot,
+    num: usize,
+    selected: bool,
+    auto: bool,
+    scheduled: bool,
+    dots: Vec<Hsla>,
+    pal: &Palette,
+) -> AnyElement {
+    let id = snap.id.clone();
+    let status_color = pal.status(snap.status);
+    let status_label = if scheduled && snap.status == Status::Paused {
+        "Scheduled"
+    } else if auto && snap.status == Status::Paused {
+        "Queued"
+    } else {
+        match snap.status {
+            Status::Connecting => "Connecting",
+            Status::Downloading => "Active",
+            Status::Paused => "Paused",
+            Status::Done => "Completed",
+            Status::Failed => "Failed",
+        }
+    };
+    let name = snap.name.clone();
+    let size = size_text(&snap);
+    let pct = if snap.total.unwrap_or(0) > 0 {
+        format!("{:.1}%", progress_ratio(&snap) * 100.0)
+    } else {
+        "—".to_string()
+    };
+    let speed = if snap.status == Status::Downloading {
+        fmt_speed(snap.speed)
+    } else {
+        "—".to_string()
+    };
+    let eta = eta_text(&snap);
+    // Completed parts over the parts this download was cut into.
+    let parts_done = snap
+        .parts
+        .iter()
+        .filter(|p| p.2 >= p.1.saturating_sub(p.0).saturating_add(1))
+        .count();
+    let parts_total = snap.parts.len();
+    let parts = if parts_total > 0 {
+        format!("{parts_done}/{parts_total}")
+    } else {
+        "—".to_string()
+    };
+    let status = snap.status;
+    let dest = snap.dest.clone();
+    let bar = progress_bar(&snap, pal);
+
+    // Open the file when it is finished, its folder otherwise; right-click
+    // always opens the folder.
+    let action = {
+        let done = status == Status::Done;
+        let dest_click = dest.clone();
+        let dest_right = dest.clone();
+        Button::new(ElementId::Name(format!("open-{id}").into()))
+            .outline()
+            .compact()
+            .icon(if done {
+                IconName::FolderOpen
+            } else {
+                IconName::Folder
+            })
+            .text_color(pal.accent)
+            .tooltip(if done {
+                "Open the file — right-click to open its folder"
+            } else {
+                "Open the download folder"
+            })
+            .on_click(move |_, _, cx: &mut App| {
+                let target = if done {
+                    std::path::PathBuf::from(&dest_click)
+                } else {
+                    std::path::Path::new(&dest_click)
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from(&dest_click))
+                };
+                crate::app::open_in_background(target, cx);
+            })
+            .on_mouse_down(MouseButton::Right, move |_, _, cx: &mut App| {
+                if let Some(dir) = std::path::Path::new(&dest_right).parent() {
+                    crate::app::open_in_background(dir.to_path_buf(), cx);
+                }
+                cx.stop_propagation();
+            })
+    };
+
+    // Pause or start this download without touching the toolbar. Every row
+    // keeps the slot: a completed download shows a check instead of vanishing.
+    let toggle = {
+        let weak = weak.clone();
+        let id = id.clone();
+        let done = status == Status::Done;
+        let running = matches!(status, Status::Downloading | Status::Connecting);
+        let (icon, tone, tip) = if done {
+            (
+                gpui_kit::assets::IconName::RotateCw,
+                pal.warn,
+                "Download again — choose whether to keep the old file",
+            )
+        } else if running {
+            (
+                gpui_kit::assets::IconName::Pause,
+                pal.warn,
+                "Pause this download",
+            )
+        } else {
+            (
+                gpui_kit::assets::IconName::Play,
+                pal.ok,
+                "Start this download",
+            )
+        };
+        Button::new(ElementId::Name(format!("toggle-{id}").into()))
+            .outline()
+            .compact()
+            // The icon inherits the button color: yellow normally, white on
+            // hover like the other action buttons.
+            .icon(Icon::new(icon))
+            .text_color(tone)
+            .tooltip(tip)
+            .on_click(move |_, window, cx: &mut App| {
+                if done {
+                    weak.update(cx, |this, cx| {
+                        this.confirm_redownload(id.clone(), window, cx);
+                    })
+                    .ok();
+                } else {
+                    weak.update(cx, |this, cx| {
+                        if running {
+                            this.svc.apply(Command::Pause(vec![id.clone()]));
+                        } else {
+                            this.svc.apply(Command::Resume(vec![id.clone()]));
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                }
+            })
+            .into_any_element()
+    };
+
+    // Always-visible "put this download in a list" shortcut, like the egui row.
+    let list_btn = {
+        let weak = weak.clone();
+        let id = id.clone();
+        Button::new(ElementId::Name(format!("list-{id}").into()))
+            .outline()
+            .compact()
+            .icon(IconName::Inbox)
+            .text_color(pal.paused)
+            .tooltip("Add to list")
+            .on_click(move |_, window, cx: &mut App| {
+                let id = id.clone();
+                weak.update(cx, |this, cx| {
+                    this.selected.clear();
+                    this.selected.insert(id.clone());
+                    this.pick_list_dialog(window, cx);
+                    cx.notify();
+                })
+                .ok();
+            })
+    };
+
+    let remove = {
+        let weak = weak.clone();
+        let id = id.clone();
+        Button::new(ElementId::Name(format!("remove-{id}").into()))
+            .outline()
+            .compact()
+            .icon(IconName::Delete)
+            .text_color(pal.bad)
+            .tooltip("Delete this download")
+            .on_click(move |_, _, cx: &mut App| {
+                weak.update(cx, |this, cx| {
+                    this.svc.apply(Command::Remove {
+                        ids: vec![id.clone()],
+                        delete_files: false,
+                    });
+                    this.selected.remove(&id);
+                    cx.notify();
+                })
+                .ok();
+            })
+    };
+
+    let props_weak = weak.clone();
+    let props_id = id.clone();
+
+    div()
+        .id(ElementId::Name(format!("row-{id}").into()))
+        // Right-click anywhere on the card opens its properties.
+        .on_mouse_down(MouseButton::Right, move |_, window, cx: &mut App| {
+            props_weak
+                .update(cx, |this, cx| this.props_dialog(props_id.clone(), window, cx))
+                .ok();
+        })
+        // Crossing rows while the button is held extends the checkbox drag.
+        .on_mouse_move({
+            let weak = weak.clone();
+            let id = id.clone();
+            move |event, _, cx: &mut App| {
+                let left = event.pressed_button == Some(MouseButton::Left);
+                let row_id = id.clone();
+                weak.update(cx, |this, cx| {
+                    let mut clear = false;
+                    let mut changed = false;
+                    if let Some(drag) = this.drag_select.as_mut() {
+                        if !left {
+                            clear = true;
+                        } else {
+                            let add = drag.add;
+                            if !drag.dragging {
+                                drag.dragging = true;
+                                let start = drag.start_id.clone();
+                                changed |= set_selected(&mut this.selected, &start, add);
+                            }
+                            changed |= set_selected(&mut this.selected, &row_id, add);
+                        }
+                    }
+                    if clear {
+                        this.drag_select = None;
+                    }
+                    if changed {
+                        cx.notify();
+                    }
+                })
+                .ok();
+            }
+        })
+        .w_full()
+        .min_w_0()
+        .flex_shrink_0()
+        .h(px(ROW_H - ROW_GAP))
+        .mb(px(ROW_GAP))
+        .px(px(6.))
+        .rounded(px(10.))
+        .bg(if selected { with_alpha(pal.accent, 0.10) } else { pal.card })
+        .border_1()
+        .border_color(if selected {
+            with_alpha(pal.accent, 0.52)
+        } else {
+            pal.line
+        })
+        .hover(|s| s.border_color(with_alpha(pal.accent, 0.38)))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.))
+        .child(
+            {
+                let weak_start = weak.clone();
+                let id_start = id.clone();
+                let weak_end = weak.clone();
+                let id_end = id.clone();
+                Checkbox::new(ElementId::Name(format!("check-{id}").into()))
+                    .checked(selected)
+                    // Press starts a drag; a release without crossing another
+                    // row is a plain click.
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut App| {
+                        let add = !selected;
+                        let id = id_start.clone();
+                        weak_start
+                            .update(cx, |this, _cx| {
+                                this.drag_select = Some(crate::app::DragSelect {
+                                    add,
+                                    start_id: id,
+                                    dragging: false,
+                                });
+                            })
+                            .ok();
+                    })
+                    .on_mouse_up(MouseButton::Left, move |_, _, cx: &mut App| {
+                        let id = id_end.clone();
+                        weak_end
+                            .update(cx, |this, cx| {
+                                let Some(drag) = this.drag_select.take() else {
+                                    return;
+                                };
+                                if drag.dragging {
+                                    cx.notify();
+                                } else if drag.start_id == id {
+                                    if drag.add {
+                                        this.selected.insert(id);
+                                    } else {
+                                        this.selected.remove(&id);
+                                    }
+                                    cx.notify();
+                                }
+                            })
+                            .ok();
+                    })
+            }
+        )
+        .child(
+            div()
+                .w(px(NUM_W))
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(if selected { pal.text } else { pal.muted })
+                .child(format!("#{num}")),
+        )
+        .child(
+            div()
+                .w(px(STATUS_W))
+                .flex_shrink_0()
+                .child(status_pill(status_label, status_color)),
+        )
+        .child(
+            div()
+                .w(px(LISTS_W))
+                .flex_shrink_0()
+                .flex()
+                .flex_row()
+                .gap(px(3.))
+                .children(dots.iter().take(2).map(|c| {
+                    Icon::new(gpui_kit::assets::IconName::List)
+                        .size(px(13.))
+                        .text_color(*c)
+                })),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(9.))
+                .child(file_badge(&name, pal))
+                .child(
+                    div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .gap(px(5.))
+                        .child(
+                            div()
+                                .id(ElementId::Name(format!("name-{id}").into()))
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(pal.text)
+                                .text_ellipsis()
+                                .child(name.clone()),
+                        )
+                        .child(bar),
+                ),
+        )
+        .child(cell_text(SIZE_W, size, pal.text))
+        .child(cell_text(PROGRESS_W, pct, pal.text))
+        .child(cell_text(SPEED_W, speed, pal.text))
+        .child(cell_text(ETA_W, eta, pal.muted))
+        .child(cell_text(PARTS_W, parts, pal.muted))
+        .child(cell_text(
+            LAST_W,
+            last_download_text(&snap),
+            pal.muted,
+        ))
+        .child(
+            div()
+                .w(px(ACTIONS_W))
+                .flex_shrink_0()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(2.))
+                .child(action)
+                .child(toggle)
+                .child(list_btn)
+                .child(remove),
+        )
+        .into_any_element()
+}
+
+fn cell_text(width: f32, text: String, color: Hsla) -> AnyElement {
+    div()
+        .w(px(width))
+        .flex_shrink_0()
+        .overflow_hidden()
+        .text_sm()
+        .text_color(color)
+        .text_ellipsis()
+        .child(text)
+        .into_any_element()
+}
+
+fn status_pill(label: &str, color: Hsla) -> AnyElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .px(px(10.))
+        .py(px(3.))
+        .rounded_full()
+        .bg(with_alpha(color, 0.15))
+        .border_1()
+        .border_color(with_alpha(color, 0.42))
+        .child(div().text_xs().text_color(color).child(label.to_string()))
+        .into_any_element()
+}
+
+fn file_badge(name: &str, pal: &Palette) -> AnyElement {
+    let color = pal.file_color(name);
+    let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    let label = if ext.is_empty() || ext.len() > 4 {
+        "FILE".to_string()
+    } else {
+        ext.to_ascii_uppercase()
+    };
+    div()
+        .size(px(30.))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(7.))
+        .bg(with_alpha(color, 0.12))
+        .border_1()
+        .border_color(with_alpha(color, 0.38))
+        .child(div().text_xs().text_color(color).child(label))
+        .into_any_element()
+}
+
+/// Bridges GPUI's uniform-list scroll handle to the component scrollbar.
+#[derive(Clone)]
+pub(crate) struct RowScroll(UniformListScrollHandle);
+
+impl RowScroll {
+    pub(crate) fn new(handle: UniformListScrollHandle) -> Self {
+        Self(handle)
+    }
+}
+
+impl gpui_kit::base::ScrollbarHandle for RowScroll {
+    fn viewport_bounds(&self) -> Bounds<Pixels> {
+        self.0 .0.borrow().base_handle.bounds()
+    }
+
+    fn offset(&self) -> Point<Pixels> {
+        self.0 .0.borrow().base_handle.offset()
+    }
+
+    fn set_offset(&self, offset: Point<Pixels>) {
+        self.0 .0.borrow().base_handle.set_offset(offset)
+    }
+
+    fn content_size(&self) -> Size<Pixels> {
+        self.0 .0.borrow().base_handle.content_size()
+    }
+}
+
+/// One slice per connection. Each slice is as wide as the byte range it covers
+/// and fills from its own left edge, so the segmentation survives instead of
+/// collapsing into a single progress bar.
+fn progress_bar(snap: &Snapshot, pal: &Palette) -> AnyElement {
+    let color = pal.status(snap.status);
+    let total = snap.total.unwrap_or(0);
+    let track = div()
+        .h(px(5.))
+        .w_full()
+        .rounded(px(3.))
+        .bg(pal.track)
+        .overflow_hidden()
+        .flex()
+        .flex_row();
+
+    if snap.status == Status::Done && total > 0 {
+        return track
+            .child(div().h_full().w_full().bg(color))
+            .into_any_element();
+    }
+
+    if total > 0 && !snap.parts.is_empty() {
+        let mut segments = div().flex().flex_row().h_full().w_full().gap(px(1.));
+        // Parts keep their creation order, and split-off tails are appended, so
+        // sort by byte offset before drawing the strip.
+        let mut ordered: Vec<&(u64, u64, u64)> = snap.parts.iter().collect();
+        ordered.sort_by_key(|p| p.0);
+        for (start, end, have) in ordered {
+            let span = end.saturating_sub(*start).saturating_add(1);
+            if span == 0 {
+                continue;
+            }
+            let filled = (*have).min(span) as f32 / span as f32;
+            segments = segments.child(
+                div()
+                    .flex_grow(span as f32)
+                    .flex_basis(px(0.))
+                    .min_w(px(1.))
+                    .h_full()
+                    .rounded(px(2.))
+                    .bg(pal.track)
+                    .overflow_hidden()
+                    .when(filled > 0.0, |d| {
+                        d.child(div().h_full().w(relative(filled)).bg(color))
+                    }),
+            );
+        }
+        return track.child(segments).into_any_element();
+    }
+
+    let pct = if total > 0 {
+        (snap.received as f32 / total as f32).clamp(0.0, 1.0)
+    } else if snap.received > 0 {
+        0.12
+    } else {
+        0.0
+    };
+    track
+        .when(pct > 0.0, |d| {
+            d.child(div().h_full().w(relative(pct)).bg(color))
+        })
+        .into_any_element()
+}
