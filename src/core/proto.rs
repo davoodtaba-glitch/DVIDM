@@ -13,6 +13,8 @@ pub(crate) enum Command {
         url: String,
         dir: PathBuf,
         file_name: Option<String>,
+        /// Download list the file belongs to; None means the default list.
+        list: Option<String>,
         /// Join the auto-starting queue instead of waiting for a manual start.
         queued: bool,
     },
@@ -79,6 +81,28 @@ pub(crate) enum Command {
     SetLastUpdateCheck(u64),
     /// Newest version the background check has already announced.
     SetUpdateNotified(String),
+    /// Browser shortcut modifier: "ctrl", "alt" or "both".
+    SetBrowserModifier(String),
+    /// Interface language: "system", "en", "fa" or "ar".
+    SetUiLang(String),
+    SetProxyMode(String),
+    /// Manual proxy protocol: "http" or "socks5".
+    SetProxyKind(String),
+    SetProxyFields {
+        host: String,
+        port: u16,
+        user: String,
+        pass: String,
+    },
+    SetProxyProtocols {
+        http: bool,
+        https: bool,
+        ftp: bool,
+    },
+    SetProxyFromBrowser(bool),
+    /// Extensions the browser Ctrl/Alt+click shortcut captures; the raw
+    /// settings text, parsed and normalized by the service.
+    SetDirectFormats(String),
     /// Drop a pending machine shutdown started by a list schedule.
     CancelShutdown,
     /// Stop every worker, persist progress and release the engine.

@@ -2,6 +2,9 @@
 use crate::app::{MainView, Page};
 use crate::core::Command;
 use crate::engine::{Category, Status};
+use crate::i18n::{t, tf, Key};
+use crate::rtl::{AlignEnd as _, DirEdge as _, Mirror as _};
+use crate::text::{display_fa_ui, ltr_isolate};
 use crate::theme::{with_alpha, Palette};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -45,9 +48,9 @@ pub(crate) fn sidebar(
 
     let mut nav = div().flex().flex_col().gap(px(2.)).px(px(8.));
     for (cat, label, icon, tone) in [
-        (Category::All, "All", CatIcon::Layers, pal.accent),
-        (Category::Active, "In progress", CatIcon::Download, pal.info),
-        (Category::Done, "Finished", CatIcon::CircleCheck, pal.ok),
+        (Category::All, t(Key::NavAll), CatIcon::Layers, pal.accent),
+        (Category::Active, t(Key::NavInProgress), CatIcon::Download, pal.info),
+        (Category::Done, t(Key::NavFinished), CatIcon::CircleCheck, pal.ok),
     ] {
         nav = nav.child(nav_item(
             format!("cat-{label}"),
@@ -74,11 +77,11 @@ pub(crate) fn sidebar(
 
     let mut library = div().flex().flex_col().gap(px(2.)).px(px(8.));
     for (cat, label, icon, tone) in [
-        (Category::Compressed, "Archives", CatIcon::Archive, pal.warn),
-        (Category::Documents, "Documents", CatIcon::FileText, pal.accent),
-        (Category::Media, "Media", CatIcon::Clapperboard, pal.paused),
-        (Category::Programs, "Apps", CatIcon::Package, pal.list_color(1)),
-        (Category::Other, "Other", CatIcon::Files, pal.muted),
+        (Category::Compressed, t(Key::NavArchives), CatIcon::Archive, pal.warn),
+        (Category::Documents, t(Key::NavDocuments), CatIcon::FileText, pal.accent),
+        (Category::Media, t(Key::NavMedia), CatIcon::Clapperboard, pal.paused),
+        (Category::Programs, t(Key::NavApps), CatIcon::Package, pal.list_color(1)),
+        (Category::Other, t(Key::NavOther), CatIcon::Files, pal.muted),
     ] {
         library = library.child(nav_item(
             format!("cat-{label}"),
@@ -134,27 +137,29 @@ pub(crate) fn sidebar(
         }
         let all_paused = any_unfinished && all_unfinished_paused;
         let state_tip = if has_active {
-            "A download in this list is in progress"
+            t(Key::ListTipActive)
         } else if list.items.is_empty() {
-            "This list is empty"
+            t(Key::ListTipEmpty)
         } else if !any_unfinished {
-            "All downloads in this list are finished"
+            t(Key::ListTipAllDone)
         } else if all_paused {
-            "All unfinished downloads in this list are paused"
+            t(Key::ListTipAllPaused)
         } else {
-            "No downloads in progress"
+            t(Key::ListTipIdle)
         };
         let sched_tip = if scheduled {
             let start = list.sched_start.unwrap_or(0);
             let end = list.sched_end.unwrap_or(0);
             let now = crate::core::sys::local_minutes();
-            format!(
-                "Downloads will start in {}.\nDownloads will run for {}.",
-                human_minutes(crate::core::schedule::until_window_open(now, start, end)),
-                human_minutes(crate::core::schedule::window_len(start, end))
+            tf(
+                Key::ListTipSchedule,
+                &[
+                    &human_minutes(crate::core::schedule::until_window_open(now, start, end)),
+                    &human_minutes(crate::core::schedule::window_len(start, end)),
+                ],
             )
         } else {
-            "No schedule set".to_string()
+            t(Key::ListTipNoSchedule).to_string()
         };
         let selected = page == Page::Downloads && active_list.as_deref() == Some(name.as_str());
         let weak_click = weak.clone();
@@ -167,11 +172,12 @@ pub(crate) fn sidebar(
                 .id(ElementId::Name(format!("list-{name}").into()))
                 .flex()
                 .flex_row()
+                .mirror()
                 .items_center()
                 .gap(px(6.))
                 .h(px(30.))
-                .pl(px(22.))
-                .pr(px(4.))
+                .padding_start(px(22.))
+                .padding_end(px(4.))
                 .rounded(px(7.))
                 .cursor_pointer()
                 .bg(if selected {
@@ -222,11 +228,10 @@ pub(crate) fn sidebar(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .overflow_hidden()
-                        .text_ellipsis()
+                        .ellipsize_ui()
                         .text_sm()
                         .text_color(if selected { pal.text } else { pal.muted })
-                        .child(name.clone()),
+                        .child(display_fa_ui(&name)),
                 )
                 // Play while any member is transferring; otherwise pause, even
                 // for an empty or fully completed list.
@@ -287,10 +292,14 @@ pub(crate) fn sidebar(
                     div()
                         .w(px(20.))
                         .flex_shrink_0()
-                        .text_right()
+                        .align_end()
                         .text_xs()
                         .text_color(if selected { pal.text } else { pal.muted })
-                        .child(if n > 0 { n.to_string() } else { String::new() }),
+                        .child(if n > 0 {
+                            ltr_isolate(&n.to_string())
+                        } else {
+                            String::new()
+                        }),
                 )
                 .child(
                     div()
@@ -306,7 +315,7 @@ pub(crate) fn sidebar(
                                 .ghost()
                                 .compact()
                                 .icon(IconName::EllipsisVertical)
-                                .tooltip("List options: rename, limit, schedule")
+                                .tooltip(t(Key::ListTipOptions))
                                 .on_click(move |_, window, cx: &mut App| {
                                     let name = name_opts.clone();
                                     weak_opts
@@ -332,7 +341,7 @@ pub(crate) fn sidebar(
                                     .compact()
                                     .icon(IconName::Delete)
                                     .text_color(pal.bad)
-                                    .tooltip("Delete this list (Shift-click skips the warning)")
+                                    .tooltip(t(Key::ListTipDelete))
                                     .on_click(move |event, window, cx: &mut App| {
                                         let name = name_delete.clone();
                                         if event.modifiers().shift {
@@ -365,6 +374,7 @@ pub(crate) fn sidebar(
         .id("new-list")
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .justify_center()
         .gap(px(6.))
@@ -388,7 +398,7 @@ pub(crate) fn sidebar(
             div()
                 .text_xs()
                 .text_color(with_alpha(pal.muted, 0.95))
-                .child("New download list"),
+                .child(t(Key::NavNewList)),
         );
 
     let settings_active = page == Page::Settings;
@@ -401,12 +411,14 @@ pub(crate) fn sidebar(
         .flex()
         .flex_col()
         .bg(pal.panel)
-        .border_r_1()
+        .when(crate::rtl::on(), |d| d.border_l_1())
+        .when(!crate::rtl::on(), |d| d.border_r_1())
         .border_color(pal.line)
         .child(
             div()
                 .flex()
                 .flex_row()
+                .mirror()
                 .items_center()
                 .gap(px(10.))
                 .px(px(18.))
@@ -415,8 +427,10 @@ pub(crate) fn sidebar(
                 .child(
                     div()
                         .id("brand-menu")
+                        .flex_shrink_0()
                         .flex()
                         .flex_row()
+                        .mirror()
                         .items_center()
                         .gap(px(10.))
                         .px(px(4.))
@@ -428,41 +442,45 @@ pub(crate) fn sidebar(
                             this.logo_menu = !this.logo_menu;
                             cx.notify();
                         }))
-                        .child(img(logo_source()).w(px(38.)).h(px(38.)))
+                        .child(img(logo_source()).w(px(38.)).h(px(38.)).flex_shrink_0())
                         .child(
                             div()
                                 .flex()
                                 .flex_col()
+                                .flex_shrink_0()
                                 .child(
                                     div()
                                         .text_sm()
                                         .font_semibold()
                                         .text_color(pal.text)
-                                        .child("DV Internet"),
+                                        .whitespace_nowrap()
+                                        .child(t(Key::BrandLine1)),
                                 )
                                 .child(
                                     div()
                                         .text_xs()
                                         .text_color(pal.muted)
-                                        .child("Download Manager"),
+                                        .whitespace_nowrap()
+                                        .child(t(Key::BrandLine2)),
                                 ),
                         ),
                 )
+                .child(div().flex_1().min_w_0())
                 .child(
                     div()
-                        .ml_auto()
+                        .flex_shrink_0()
                         .text_xs()
                         .text_color(pal.muted)
                         .child(env!("CARGO_PKG_VERSION")),
                 ),
         )
-        .child(section_header("LIBRARY", fold[0], weak.clone(), 0, pal))
+        .child(section_header(t(Key::NavLibrary), fold[0], weak.clone(), 0, pal))
         .when(fold[0], |d| d.child(nav))
         .child(div().h(px(10.)))
-        .child(section_header("CATEGORIES", fold[1], weak.clone(), 1, pal))
+        .child(section_header(t(Key::NavCategories), fold[1], weak.clone(), 1, pal))
         .when(fold[1], |d| d.child(library))
         .child(div().h(px(10.)))
-        .child(section_header("DOWNLOAD LISTS", fold[2], weak.clone(), 2, pal))
+        .child(section_header(t(Key::NavLists), fold[2], weak.clone(), 2, pal))
         .child(
             div()
                 .id("lists-scroll")
@@ -486,6 +504,7 @@ pub(crate) fn sidebar(
                         .id("settings-nav")
                         .flex()
                         .flex_row()
+                        .mirror()
                         .items_center()
                         .justify_center()
                         .gap(px(8.))
@@ -503,6 +522,7 @@ pub(crate) fn sidebar(
                                 .update(cx, |this, cx| {
                                     if this.page == Page::Settings {
                                         // The same entry closes the page again.
+                                        this.flush_direct_formats(true, cx);
                                         this.page = Page::Downloads;
                                         cx.notify();
                                     } else {
@@ -513,7 +533,11 @@ pub(crate) fn sidebar(
                         })
                         .child(
                             Icon::new(if settings_active {
-                                IconName::ChevronLeft
+                                if crate::rtl::on() {
+                                    IconName::ChevronRight
+                                } else {
+                                    IconName::ChevronLeft
+                                }
                             } else {
                                 IconName::Settings
                             })
@@ -525,9 +549,9 @@ pub(crate) fn sidebar(
                                 .text_sm()
                                 .text_color(if settings_active { pal.text } else { pal.muted })
                                 .child(if settings_active {
-                                    "Close settings"
+                                    t(Key::NavCloseSettings)
                                 } else {
-                                    "Settings"
+                                    t(Key::NavSettings)
                                 }),
                         ),
                 ),
@@ -581,17 +605,17 @@ impl SchedulePreview {
     }
 
     fn lines(&self, cx: &App) -> Option<(String, String)> {
-        let start = crate::core::schedule::parse_hm(self.start.read(cx).value().as_ref())?;
-        let end = crate::core::schedule::parse_hm(self.end.read(cx).value().as_ref())?;
+        let start = crate::core::schedule::parse_hm(&crate::text::from_fa_digits(self.start.read(cx).value().as_ref()))?;
+        let end = crate::core::schedule::parse_hm(&crate::text::from_fa_digits(self.end.read(cx).value().as_ref()))?;
         let now = crate::core::sys::local_minutes();
         Some((
-            format!(
-                "Downloads will start in {}.",
-                human_minutes(crate::core::schedule::until_window_open(now, start, end))
+            tf(
+                Key::ScheduleStartsIn,
+                &[&human_minutes(crate::core::schedule::until_window_open(now, start, end))],
             ),
-            format!(
-                "Downloads will run for {}.",
-                human_minutes(crate::core::schedule::window_len(start, end))
+            tf(
+                Key::ScheduleRunsFor,
+                &[&human_minutes(crate::core::schedule::window_len(start, end))],
             ),
         ))
     }
@@ -606,14 +630,18 @@ impl Render for SchedulePreview {
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .child(div().text_xs().text_color(pal.muted).child(start_line))
-                .child(div().text_xs().text_color(pal.muted).child(run_line))
+                .w_full()
+                .align_end()
+                .child(div().text_xs().text_color(pal.muted).align_end().child(start_line))
+                .child(div().text_xs().text_color(pal.muted).align_end().child(run_line))
                 .into_any_element()
         } else {
             div()
+                .w_full()
                 .text_xs()
                 .text_color(pal.muted)
-                .child("Enter both times to preview the schedule.")
+                .align_end()
+                .child(t(Key::ScheduleEnterTimes))
                 .into_any_element()
         };
         div()
@@ -632,16 +660,20 @@ fn human_minutes(minutes: u32) -> String {
     let mins = minutes % 60;
     let mut parts = Vec::new();
     if hours > 0 {
-        parts.push(format!(
-            "{hours} hour{}",
-            if hours == 1 { "" } else { "s" }
-        ));
+        let n = ltr_isolate(&hours.to_string());
+        parts.push(if hours == 1 {
+            tf(Key::DurationHour, &[&n])
+        } else {
+            tf(Key::DurationHours, &[&n])
+        });
     }
     if mins > 0 || hours == 0 {
-        parts.push(format!(
-            "{mins} minute{}",
-            if mins == 1 { "" } else { "s" }
-        ));
+        let n = ltr_isolate(&mins.to_string());
+        parts.push(if mins == 1 {
+            tf(Key::DurationMinute, &[&n])
+        } else {
+            tf(Key::DurationMinutes, &[&n])
+        });
     }
     parts.join(" ")
 }
@@ -683,7 +715,7 @@ fn watch_clock(
         // rewrite the text once the current update has finished.
         window.defer(cx, move |window, cx| {
             let current = state.read(cx).value().to_string();
-            let fixed = normalize_clock(&current);
+            let fixed = crate::text::fa_input(&normalize_clock(&crate::text::from_fa_digits(&current)));
             if fixed != current {
                 state.update(cx, |field, cx| field.set_value(fixed, window, cx));
             }
@@ -721,31 +753,35 @@ fn toggle_switch(
                 .size(px(10.))
                 .rounded_full()
                 .bg(if on { pal.bg } else { pal.muted })
-                .ml(px(if on { 16. } else { 2. })),
+                .ml(px(crate::rtl::switch_thumb_ml(on))),
         )
         .into_any_element()
 }
 
-fn field_label(label: &str, pal: Palette) -> AnyElement {
+fn field_label(label: impl AsRef<str>, pal: Palette) -> AnyElement {
     div()
+        .w_full()
         .text_xs()
         .text_color(pal.muted)
-        .child(label.to_string())
+        .align_end()
+        .child(label.as_ref().to_string())
         .into_any_element()
 }
 
 /// A collapsible section title: the whole row toggles the group open or shut.
 fn section_header(
-    label: &str,
+    label: impl AsRef<str>,
     open: bool,
     weak: WeakEntity<MainView>,
     idx: usize,
     pal: Palette,
 ) -> AnyElement {
+    let label = label.as_ref();
     div()
         .id(ElementId::Name(format!("section-{label}").into()))
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .gap(px(8.))
         .h(px(28.))
@@ -790,6 +826,8 @@ fn section_header(
         .child(
             Icon::new(if open {
                 IconName::ChevronDown
+            } else if crate::rtl::on() {
+                IconName::ChevronLeft
             } else {
                 IconName::ChevronRight
             })
@@ -803,7 +841,7 @@ fn section_header(
 #[allow(clippy::too_many_arguments)]
 fn nav_item(
     id: String,
-    label: &str,
+    label: impl AsRef<str>,
     icon: CatIcon,
     tone: Hsla,
     count: usize,
@@ -811,15 +849,17 @@ fn nav_item(
     pal: Palette,
     on_click: impl Fn(&mut App) + 'static,
 ) -> AnyElement {
+    let label = label.as_ref().to_string();
     div()
         .id(ElementId::Name(id.into()))
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .gap(px(8.))
         .h(px(30.))
-        .pl(px(22.))
-        .pr(px(9.))
+        .padding_start(px(22.))
+        .padding_end(px(9.))
         .rounded(px(7.))
         .cursor_pointer()
         .bg(if active { pal.accent_dim } else { pal.panel })
@@ -845,17 +885,27 @@ fn nav_item(
         .child(
             div()
                 .flex_1()
+                .min_w_0()
                 .text_sm()
                 .text_color(if active { pal.text } else { pal.muted })
                 .child(label.to_string()),
         )
-        .when(count > 0, |d| {
-            d.child(
-                div()
-                    .text_xs()
-                    .text_color(if active { pal.text } else { pal.muted })
-                    .child(count.to_string()),
-            )
+        .child({
+            let cell = div()
+                .w(px(28.))
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(if active { pal.text } else { pal.muted })
+                .child(if count > 0 {
+                    ltr_isolate(&count.to_string())
+                } else {
+                    String::new()
+                });
+            if crate::rtl::on() {
+                cell
+            } else {
+                cell.text_right()
+            }
         })
         .into_any_element()
 }
@@ -878,11 +928,7 @@ impl MainView {
             .map(|s| s.url.clone())
             .collect();
         if urls.is_empty() {
-            self.show_notice(
-                "This list has no unfinished downloads to save".into(),
-                true,
-                cx,
-            );
+            self.show_notice(t(Key::ListExportEmpty).to_string(), true, cx);
             return;
         }
         let count = urls.len();
@@ -892,7 +938,7 @@ impl MainView {
             let picked = smol::unblock(move || {
                 rfd::FileDialog::new()
                     .set_file_name(default_name)
-                    .add_filter("Text files", &["txt"])
+                    .add_filter(t(Key::DialogFilterText), &["txt"])
                     .save_file()
             })
             .await;
@@ -903,8 +949,14 @@ impl MainView {
             let failed = result.is_err();
             this.update(cx, |this, cx| {
                 let text = match result {
-                    Ok(()) => format!("Saved {count} link(s) to {}", path.display()),
-                    Err(e) => format!("Could not save the list: {e}"),
+                    Ok(()) => tf(
+                        Key::ListExportSaved,
+                        &[
+                            &ltr_isolate(&count.to_string()),
+                            &path.display().to_string(),
+                        ],
+                    ),
+                    Err(e) => tf(Key::ListExportFailed, &[&e.to_string()]),
                 };
                 this.show_notice(text, failed, cx);
             })
@@ -918,7 +970,7 @@ impl MainView {
         cx.spawn(async move |this, cx| {
             let picked = smol::unblock(|| {
                 rfd::FileDialog::new()
-                    .add_filter("Text files", &["txt"])
+                    .add_filter(t(Key::DialogFilterText), &["txt"])
                     .pick_files()
             })
             .await;
@@ -935,10 +987,10 @@ impl MainView {
             urls.retain(|url| seen.insert(url.clone()));
             this.update(cx, |this, cx| {
                 if urls.is_empty() {
-                    this.show_notice("No links found in the selected file(s)".into(), true, cx);
+                    this.show_notice(t(Key::ListImportEmpty).to_string(), true, cx);
                 } else {
                     this.clip_list = Some(name.clone());
-                    this.open_clip(urls, "file", cx);
+                    this.open_clip(urls, t(Key::ClipSourceFile), cx);
                 }
                 cx.notify();
             })
@@ -982,30 +1034,32 @@ impl MainView {
             .count();
         let members = list.items.len();
 
-        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("List name"));
-        name_input.update(cx, |state, cx| state.set_value(name.clone(), window, cx));
+        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::ListNamePlaceholder)));
+        name_input.update(cx, |state, cx| {
+            state.set_value(crate::text::fa_input(&name), window, cx)
+        });
         // A typed value beats the presets; empty means "no cap".
-        let cap_input = cx.new(|cx| InputState::new(window, cx).placeholder("custom"));
+        let cap_input = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::ListCapCustomPlaceholder)));
         if list.max_parallel > 0 {
             cap_input.update(cx, |state, cx| {
-                state.set_value(list.max_parallel.to_string(), window, cx)
+                state.set_value(crate::text::fa_input(&list.max_parallel.to_string()), window, cx)
             });
         }
-        let start = cx.new(|cx| InputState::new(window, cx).placeholder("08:00"));
-        let end = cx.new(|cx| InputState::new(window, cx).placeholder("22:00"));
+        let start = cx.new(|cx| InputState::new(window, cx).placeholder(crate::text::fa_input("08:00")));
+        let end = cx.new(|cx| InputState::new(window, cx).placeholder(crate::text::fa_input("22:00")));
         start.update(cx, |state, cx| {
             let text = list
                 .sched_start
                 .map(crate::core::schedule::fmt_hm)
                 .unwrap_or_else(|| "08:00".into());
-            state.set_value(text, window, cx)
+            state.set_value(crate::text::fa_input(&text), window, cx)
         });
         end.update(cx, |state, cx| {
             let text = list
                 .sched_end
                 .map(crate::core::schedule::fmt_hm)
                 .unwrap_or_else(|| "22:00".into());
-            state.set_value(text, window, cx)
+            state.set_value(crate::text::fa_input(&text), window, cx)
         });
         // Keep the colon in place as the time is typed: `0800` -> `08:00`.
         self.clock_subs = vec![
@@ -1030,7 +1084,7 @@ impl MainView {
         window.open_dialog(cx, move |dialog, _window, cx| {
             // The typed count drives the preset highlight, so they never
             // disagree once a custom value is entered.
-            let typed_cap = cap_field_render.read(cx).value().trim().to_string();
+            let typed_cap = crate::text::from_fa_digits(cap_field_render.read(cx).value().trim());
             let cap = match typed_cap.parse::<u32>() {
                 Ok(n) => n,
                 Err(_) if typed_cap.is_empty() => 0,
@@ -1043,8 +1097,14 @@ impl MainView {
                 .unwrap_or(false);
             // The dialog builder is `Fn`, so each rebuild takes its own handle.
             let cap_field_save = cap_field_save_src.clone();
-            let mut caps = div().flex().flex_row().items_center().gap(px(4.));
-            for (value, label) in [(0u32, "No cap"), (1, "1"), (2, "2"), (4, "4"), (8, "8")] {
+            let mut caps = div().w_full().flex().flex_row().mirror().items_center().gap(px(4.));
+            for (value, label) in [
+                (0u32, t(Key::ListCapNone)),
+                (1, ltr_isolate("1")),
+                (2, ltr_isolate("2")),
+                (4, ltr_isolate("4")),
+                (8, ltr_isolate("8")),
+            ] {
                 let weak_cap = weak.clone();
                 let cap_field = cap_field_preset.clone();
                 caps = caps.child(
@@ -1058,7 +1118,7 @@ impl MainView {
                                 let text = if value == 0 {
                                     String::new()
                                 } else {
-                                    value.to_string()
+                                    crate::text::fa_input(&value.to_string())
                                 };
                                 state.set_value(text, window, cx)
                             });
@@ -1077,11 +1137,11 @@ impl MainView {
                     div()
                         .text_sm()
                         .text_color(pal.muted)
-                        .child("Custom"),
+                        .child(t(Key::CommonCustom)),
                 )
                 .child(div().w(px(72.)).child(Input::new(&cap_field_render)));
 
-            let mut swatches = div().flex().flex_row().gap(px(6.));
+            let mut swatches = div().w_full().flex().flex_row().mirror().gap(px(6.));
             let current_color = weak
                 .read_with(cx, |this, _| this.list_opts_color)
                 .unwrap_or(0);
@@ -1118,24 +1178,26 @@ impl MainView {
             let start_field = start.clone();
             let end_field = end.clone();
             dialog
-                .title(format!("List options — {name}"))
+                .title(tf(Key::ListOptionsTitle, &[&name]))
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap(px(10.))
                         .w_full()
-                        .child(field_label("Name", pal))
+                        .align_end()
+                        .child(field_label(t(Key::ListFieldName), pal))
                         .child(Input::new(&name_input))
-                        .child(field_label("Downloads from this list at once", pal))
+                        .child(field_label(t(Key::ListFieldCap), pal))
                         .child(caps)
-                        .child(field_label("Label colour", pal))
+                        .child(field_label(t(Key::ListFieldColor), pal))
                         .child(swatches)
-                        .child(field_label("Time window", pal))
+                        .child(field_label(t(Key::ListFieldWindow), pal))
                         .child({
                             let weak_sched = weak.clone();
                             let sched_signal_toggle = sched_signal.clone();
                             div()
+                                .w_full()
                                 .flex()
                                 .flex_row()
                                 .items_center()
@@ -1154,15 +1216,18 @@ impl MainView {
                                 }))
                                 .child(
                                     div()
+                                        .flex_1()
                                         .text_sm()
                                         .text_color(pal.text)
-                                        .child("Enable a scheduled time range"),
+                                        .align_end()
+                                        .child(t(Key::ListEnableSchedule)),
                                 )
                         })
                         .child(
                             div()
                                 .flex()
                                 .flex_row()
+                                .mirror()
                                 .items_center()
                                 .gap(px(6.))
                                 .when(!sched_on, |d| d.opacity(0.45))
@@ -1171,7 +1236,7 @@ impl MainView {
                                         .flex_1()
                                         .child(Input::new(&start).disabled(!sched_on)),
                                 )
-                                .child(div().text_sm().text_color(pal.muted).child("to"))
+                                .child(div().text_sm().text_color(pal.muted).child(t(Key::ScheduleTo)))
                                 .child(
                                     div()
                                         .flex_1()
@@ -1184,6 +1249,7 @@ impl MainView {
                                 .read_with(cx, |this, _| this.list_opts_shutdown)
                                 .unwrap_or(shutdown_at_end);
                             div()
+                                .w_full()
                                 .flex()
                                 .flex_row()
                                 .items_center()
@@ -1203,9 +1269,11 @@ impl MainView {
                                 ))
                                 .child(
                                     div()
+                                        .flex_1()
                                         .text_sm()
                                         .text_color(pal.text)
-                                        .child("Force shut down when the window ends"),
+                                        .align_end()
+                                        .child(t(Key::ListForceShutdown)),
                                 )
                                 .into_any_element()
                         } else {
@@ -1213,10 +1281,16 @@ impl MainView {
                         })
                         .child(
                             div()
+                                .w_full()
                                 .text_xs()
                                 .text_color(pal.muted)
-                                .child(format!(
-                                    "Downloading now: {running} of {members} in this list",
+                                .align_end()
+                                .child(tf(
+                                    Key::ListDownloadingNow,
+                                    &[
+                                        &ltr_isolate(&running.to_string()),
+                                        &ltr_isolate(&members.to_string()),
+                                    ],
                                 )),
                         ),
                 )
@@ -1224,14 +1298,15 @@ impl MainView {
                     div()
                         .flex()
                         .flex_row()
+                        .mirror()
                         .items_center()
                         .gap(px(8.))
                         .py(px(10.))
                         .child(
                             Button::new("list-export")
                                 .outline()
-                                .label("Save list…")
-                                .tooltip("Save this list's unfinished links to a text file")
+                                .label(t(Key::ListSaveList))
+                                .tooltip(t(Key::ListSaveListTip))
                                 .on_click({
                                     let weak = weak.clone();
                                     let name = name.clone();
@@ -1247,8 +1322,8 @@ impl MainView {
                         .child(
                             Button::new("list-import")
                                 .outline()
-                                .label("Load list…")
-                                .tooltip("Choose text files and add their links to this list")
+                                .label(t(Key::ListLoadList))
+                                .tooltip(t(Key::ListLoadListTip))
                                 .on_click({
                                     let weak = weak.clone();
                                     let name = name.clone();
@@ -1275,20 +1350,22 @@ impl MainView {
                         .child(
                             Button::new("list-opts-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(t(Key::CommonCancel))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("list-opts-ok")
                                 .primary()
-                                .label("Save")
+                                .label(t(Key::CommonSave))
                                 .on_click(move |_, window, cx| {
-                                    let new_name = name_field.read(cx).value().trim().to_string();
+                                    let new_name = crate::text::from_fa_digits(
+                                        name_field.read(cx).value().trim(),
+                                    );
                                     let sched_start = crate::core::schedule::parse_hm(
-                                        start_field.read(cx).value().as_ref(),
+                                        &crate::text::from_fa_digits(start_field.read(cx).value().as_ref()),
                                     );
                                     let sched_end = crate::core::schedule::parse_hm(
-                                        end_field.read(cx).value().as_ref(),
+                                        &crate::text::from_fa_digits(end_field.read(cx).value().as_ref()),
                                     );
                             let sched_on = weak_ok
                                 .read_with(cx, |this, _| this.list_opts_sched)
@@ -1312,7 +1389,7 @@ impl MainView {
                                 .unwrap_or((0, 0, false));
                             // A typed count wins over the presets; an empty box
                             // means the list has no cap.
-                            let typed = cap_field_save.read(cx).value().trim().to_string();
+                            let typed = crate::text::from_fa_digits(cap_field_save.read(cx).value().trim());
                             let cap = if typed.is_empty() {
                                 0
                             } else {
@@ -1369,28 +1446,26 @@ impl MainView {
         let label = name.clone();
         window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
-                .title("Delete list?")
+                .title(t(Key::ListDeleteTitle))
                 .width(px(430.))
                 .child(
                     div()
                         .text_sm()
                         .text_color(pal.text)
-                        .child(format!(
-                            "Delete “{label}”? Its downloads stay in the app and on disk."
-                        )),
+                        .child(tf(Key::ListDeleteBody, &[&label])),
                 )
                 .footer(
                     DialogFooter::new()
                         .child(
                             Button::new("del-list-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(t(Key::CommonCancel))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("del-list-ok")
                                 .danger()
-                                .label("Delete list")
+                                .label(t(Key::ListDeleteConfirm))
                                 .on_click({
                                     let weak = weak.clone();
                                     let target = name.clone();
@@ -1414,27 +1489,27 @@ impl MainView {
     }
 
     fn new_list_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("List name"));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::ListNamePlaceholder)));
         let weak = cx.entity().downgrade();
         let input = name.clone();
         window.open_dialog(cx, move |dialog, _window, _cx| {
             let weak_ok = weak.clone();
             let input_ok = input.clone();
             dialog
-                .title("New download list")
+                .title(t(Key::ListNewTitle))
                 .child(Input::new(&input))
                 .footer(
                     DialogFooter::new()
                         .child(
                             Button::new("new-list-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(t(Key::CommonCancel))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("new-list-ok")
                                 .primary()
-                                .label("Create")
+                                .label(t(Key::CommonCreate))
                                 .on_click(move |_, window, cx| {
                                     let name = input_ok.read(cx).value().trim().to_string();
                                     if name.is_empty() {

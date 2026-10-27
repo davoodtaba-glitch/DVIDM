@@ -10,7 +10,7 @@ use super::prefs::{load_prefs, DownloadList, Prefs, LIST_COLOR_COUNT, MAX_LIMIT_
 use super::proto::{Command, Event, ViewState};
 use super::schedule::{list_rules, plan_limit_actions, schedule_events};
 use super::sys;
-use crate::engine::{now_ms, Manager, Snapshot, Status};
+use crate::engine::{now_ms, Category, Manager, Snapshot, Status};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -31,6 +31,9 @@ pub(crate) struct DownloadService {
     known_done: HashSet<String>,
     /// Previous status per download, for the debug log.
     last_status: HashMap<String, Status>,
+    /// URL currently pushed into the engine; `None` means direct.
+    proxy_current: Option<String>,
+    proxy_checked: std::time::Instant,
     view: ViewState,
 }
 
@@ -90,9 +93,15 @@ impl DownloadService {
             shutdown_at: None,
             known_done: HashSet::new(),
             last_status: HashMap::new(),
+            // A sentinel so the first apply always logs and pushes the value.
+            proxy_current: Some(String::new()),
+            proxy_checked: std::time::Instant::now(),
             view: ViewState::default(),
         };
         svc.apply_settings();
+        // Serve the browser-shortcut format list from the local HTTP server.
+        super::server::set_direct_formats(svc.prefs.direct_formats.clone());
+        super::server::set_browser_modifier(svc.prefs.browser_modifier.clone());
         // Start with Windows unless the user has already made that choice;
         // settings written by older builds have no marker, so they get the
         // new default once.
@@ -104,7 +113,10 @@ impl DownloadService {
             svc.prefs.autostart_configured = true;
             reset = true;
         }
-        if reset || normalize_lists(&mut svc.prefs.lists) {
+        if reset
+            || normalize_lists(&mut svc.prefs.lists)
+            || !super::prefs::settings_have_direct_formats()
+        {
             svc.prefs.save();
         }
         svc.view.snaps = svc.mgr.list();
@@ -211,10 +223,52 @@ impl DownloadService {
         let dir = self.save_dir();
         let _ = std::fs::create_dir_all(&dir);
         self.mgr.save_dir = dir;
+        self.apply_proxy();
+    }
+
+    fn apply_proxy(&mut self) {
+        let mode = super::prefs::normalize_proxy_mode(&self.prefs.proxy_mode);
+        let mut url: Option<String> = None;
+        if mode == "manual" && (self.prefs.proxy_http || self.prefs.proxy_https) {
+            let host = self.prefs.proxy_host.trim();
+            if host.is_empty() {
+                super::log::write("proxy: manual mode but the address is empty");
+            } else {
+                url = Some(build_proxy_url(
+                    host,
+                    self.prefs.proxy_port,
+                    &self.prefs.proxy_kind,
+                    self.prefs.proxy_user.trim(),
+                    self.prefs.proxy_pass.trim(),
+                ));
+            }
+        } else if mode == "system" || (mode == "none" && self.prefs.proxy_from_browser) {
+            url = super::sys::system_proxy();
+            if url.is_none() {
+                super::log::write("proxy: system mode but Windows has no proxy configured");
+            }
+        }
+        if url == self.proxy_current {
+            return;
+        }
+        match &url {
+            Some(value) => super::log::write(format!("proxy: {}", mask_proxy(value))),
+            None => super::log::write("proxy: direct"),
+        }
+        crate::engine::set_proxy(url.clone());
+        self.proxy_current = url;
     }
 
     /// Time-driven work: speed sampling, list caps, schedules, shutdown.
     pub(crate) fn tick(&mut self) -> Vec<Event> {
+        // Windows can enable/disable its proxy while DVIDM is running.
+        let mode = super::prefs::normalize_proxy_mode(&self.prefs.proxy_mode);
+        if (mode == "system" || (mode == "none" && self.prefs.proxy_from_browser))
+            && self.proxy_checked.elapsed() >= std::time::Duration::from_secs(2)
+        {
+            self.proxy_checked = std::time::Instant::now();
+            self.apply_proxy();
+        }
         let mut events = Vec::new();
         self.mgr.tick_speeds();
         self.view.snaps = self.mgr.list();
@@ -269,25 +323,44 @@ impl DownloadService {
                 url,
                 dir,
                 file_name,
+                list,
                 queued,
             } => {
                 self.mgr.connections = self.prefs.conns.clamp(1, 32);
+                let default = self
+                    .prefs
+                    .lists
+                    .iter()
+                    .find(|l| l.is_default)
+                    .map(|l| l.name.clone());
+                let list_name = list.clone().or_else(|| default.clone());
+                let list_folder = list_name
+                    .as_deref()
+                    .map(crate::engine::sanitize)
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| "Unlisted".into());
+                let guess = file_name
+                    .clone()
+                    .unwrap_or_else(|| crate::engine::guess_name(&url));
+                let cat_folder = match crate::engine::category_of(&guess) {
+                    Category::Compressed => "Archives",
+                    Category::Documents => "Documents",
+                    Category::Media => "Media",
+                    Category::Programs => "Apps",
+                    _ => "Other",
+                };
+                let target_dir = dir.join(&list_folder).join(cat_folder);
+                let temp_sub = format!("{list_folder}/{cat_folder}");
                 // With the queue off a new download starts at once; the flag
                 // only holds it back when the user asked for a queue.
-                match self.mgr.add(&url, Some(dir), queued, file_name.as_deref()) {
+                match self.mgr.add(&url, Some(target_dir), queued, file_name.as_deref(), &temp_sub) {
                     Ok(id) => {
                         if queued {
                             // "Don't start immediately" is a user hold, not a
                             // list-cap pause: the limiter must not auto-resume it.
                             self.user_paused.insert(id.clone());
                         }
-                        let default = self
-                            .prefs
-                            .lists
-                            .iter()
-                            .find(|l| l.is_default)
-                            .map(|l| l.name.clone());
-                        if let Some(name) = default {
+                        if let Some(name) = list_name {
                             self.assign_to_list(&[id.clone()], &name);
                         }
                         events.push(Event::Added(id));
@@ -481,6 +554,57 @@ impl DownloadService {
             }
             Command::SetFocusNewDownload(on) => {
                 self.prefs.focus_new_download = on;
+                self.prefs.save();
+            }
+            Command::SetProxyMode(raw) => {
+                self.prefs.proxy_mode = super::prefs::normalize_proxy_mode(&raw);
+                self.prefs.save();
+                self.apply_proxy();
+            }
+            Command::SetProxyKind(raw) => {
+                self.prefs.proxy_kind = super::prefs::normalize_proxy_kind(&raw);
+                self.prefs.save();
+                self.apply_proxy();
+            }
+            Command::SetProxyFields { host, port, user, pass } => {
+                self.prefs.proxy_host = host;
+                self.prefs.proxy_port = port.max(1);
+                self.prefs.proxy_user = user;
+                self.prefs.proxy_pass = pass;
+                // Typing a proxy address is an explicit opt-in; leaving the
+                // mode on "No proxy" would silently ignore it.
+                if !self.prefs.proxy_host.trim().is_empty()
+                    && super::prefs::normalize_proxy_mode(&self.prefs.proxy_mode) == "none"
+                {
+                    self.prefs.proxy_mode = "manual".into();
+                }
+                self.prefs.save();
+                self.apply_proxy();
+            }
+            Command::SetProxyProtocols { http, https, ftp } => {
+                self.prefs.proxy_http = http;
+                self.prefs.proxy_https = https;
+                self.prefs.proxy_ftp = ftp;
+                self.prefs.save();
+                self.apply_proxy();
+            }
+            Command::SetProxyFromBrowser(on) => {
+                self.prefs.proxy_from_browser = on;
+                self.prefs.save();
+                self.apply_proxy();
+            }
+            Command::SetBrowserModifier(raw) => {
+                self.prefs.browser_modifier = super::prefs::normalize_browser_modifier(&raw);
+                super::server::set_browser_modifier(self.prefs.browser_modifier.clone());
+                self.prefs.save();
+            }
+            Command::SetUiLang(raw) => {
+                self.prefs.ui_lang = super::prefs::normalize_ui_lang(&raw);
+                self.prefs.save();
+            }
+            Command::SetDirectFormats(raw) => {
+                self.prefs.direct_formats = super::prefs::parse_direct_formats(&raw);
+                super::server::set_direct_formats(self.prefs.direct_formats.clone());
                 self.prefs.save();
             }
             Command::SetSort { col, desc } => {
@@ -702,5 +826,95 @@ fn migrate_temp_files(from: &Path, to: &Path) {
                 let _ = std::fs::remove_file(&path);
             }
         }
+    }
+}
+
+/// Build the engine proxy URL from the settings fields. A full URL
+/// (`socks5://host:port`) is used as typed; otherwise the scheme comes from
+/// the proxy-kind selector and the port is only added when the address does
+/// not already carry one.
+fn build_proxy_url(host: &str, port: u16, kind: &str, user: &str, pass: &str) -> String {
+    let host = host.trim().trim_end_matches('/');
+    let mut base = if host.contains("://") {
+        host.to_string()
+    } else {
+        let scheme = super::prefs::normalize_proxy_kind(kind);
+        let (address, has_port) = split_host_port(host);
+        if has_port {
+            format!("{scheme}://{address}")
+        } else {
+            format!("{scheme}://{address}:{}", port.max(1))
+        }
+    };
+    if !user.is_empty() {
+        if let Some((scheme, rest)) = base.split_once("://") {
+            // ureq's proxy parser reads the credentials verbatim (it does not
+            // percent-decode), so pass them through as typed.
+            base = format!("{scheme}://{user}:{pass}@{rest}");
+        }
+    }
+    base
+}
+
+fn split_host_port(host: &str) -> (String, bool) {
+    let host = host.trim();
+    if host.starts_with('[') {
+        if let Some(end) = host.find(']') {
+            let rest = &host[end + 1..];
+            return (host.to_string(), rest.starts_with(':') && rest.len() > 1);
+        }
+    }
+    if host.matches(':').count() > 1 {
+        // Bare IPv6 address: brackets are required in a URL authority.
+        return (format!("[{host}]"), false);
+    }
+    match host.rsplit_once(':') {
+        Some((head, tail))
+            if !head.is_empty()
+                && !tail.is_empty()
+                && tail.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            (host.to_string(), true)
+        }
+        _ => (host.to_string(), false),
+    }
+}
+
+fn mask_proxy(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    match rest.rsplit_once('@') {
+        Some((_, host)) => format!("{scheme}://<auth>@{host}"),
+        None => url.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod proxy_url_tests {
+    use super::build_proxy_url;
+
+    #[test]
+    fn proxy_url_shapes() {
+        assert_eq!(
+            build_proxy_url("127.0.0.1", 1080, "socks5", "", ""),
+            "socks5://127.0.0.1:1080"
+        );
+        assert_eq!(
+            build_proxy_url("127.0.0.1:1081", 9999, "http", "", ""),
+            "http://127.0.0.1:1081"
+        );
+        assert_eq!(
+            build_proxy_url("socks5://127.0.0.1:1080", 9999, "http", "", ""),
+            "socks5://127.0.0.1:1080"
+        );
+        assert_eq!(
+            build_proxy_url("proxy.local", 8080, "http", "user", "p@ss:1"),
+            "http://user:p@ss:1@proxy.local:8080"
+        );
+        assert_eq!(
+            build_proxy_url("[::1]", 1080, "socks5", "", ""),
+            "socks5://[::1]:1080"
+        );
     }
 }

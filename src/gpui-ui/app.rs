@@ -8,6 +8,9 @@
 use crate::clipboard::ClipImport;
 use crate::core::{Command, DownloadService, Event};
 use crate::engine::{Category, Snapshot, Status};
+use crate::i18n::{self, t, tf, Key};
+use crate::rtl::{AlignEnd as _, DirEdge as _, Mirror as _};
+use crate::text::ltr_isolate;
 use crate::shell::{self, Tray, TrayMsg};
 use crate::theme::{with_alpha, Palette};
 use gpui_kit::prelude::*;
@@ -16,7 +19,7 @@ use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::component::dialog::DialogFooter;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable as _, Icon, IconName};
 use gpui_kit::component::WindowExt as _;
@@ -145,6 +148,11 @@ pub(crate) struct MainView {
     pub(crate) limit_input: Entity<InputState>,
     /// The typed limit is in charge; no preset is selected.
     pub(crate) limit_custom: bool,
+    pub(crate) formats_input: Entity<TextareaState>,
+    pub(crate) proxy_host_input: Entity<InputState>,
+    pub(crate) proxy_port_input: Entity<InputState>,
+    pub(crate) proxy_user_input: Entity<InputState>,
+    pub(crate) proxy_pass_input: Entity<InputState>,
     /// Download whose properties dialog is open.
     pub(crate) props_id: Option<String>,
     /// Which property row was copied last, for the button's "Copied" state.
@@ -199,6 +207,8 @@ pub(crate) struct MainView {
     pub(crate) visible: bool,
     /// URL batches posted by the Chrome extension.
     pub(crate) remote_rx: std::sync::mpsc::Receiver<crate::core::server::RemoteBatch>,
+    /// Interface language already applied to the RTL flag.
+    ui_lang_seen: String,
 }
 
 impl MainView {
@@ -209,13 +219,40 @@ impl MainView {
         let sort = SortCol::from_key(svc.prefs().sort_col.trim())
             .map(|col| (col, svc.prefs().sort_desc));
         crate::apply_theme(dark, cx);
+        let ui_lang = svc.prefs().ui_lang.clone();
+        crate::i18n::apply(&ui_lang);
 
         let url = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("https://example.com/file.zip")
+            InputState::new(window, cx).placeholder(t(Key::AddUrlPlaceholder))
         });
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search downloads…"));
-        let limit_input = cx.new(|cx| InputState::new(window, cx).placeholder("KB/s"));
-        let props_url = cx.new(|cx| InputState::new(window, cx).placeholder("https://…"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::ToolbarSearchPlaceholder)));
+        let limit_input = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::UnitsKbps)));
+        let initial_formats = crate::core::prefs::format_direct_formats(&svc.prefs().direct_formats);
+        let formats_input = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .placeholder(t(Key::SettingsFormatsPlaceholder));
+            state.set_value(initial_formats, window, cx);
+            state
+        });
+        let proxy_host = svc.prefs().proxy_host.clone();
+        let proxy_port = svc.prefs().proxy_port.max(1).to_string();
+        let proxy_user = svc.prefs().proxy_user.clone();
+        let proxy_pass = svc.prefs().proxy_pass.clone();
+        let proxy_host_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).placeholder(t(Key::SettingsProxyHostPlaceholder));
+            state.set_value(proxy_host, window, cx);
+            state
+        });
+        let proxy_port_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).placeholder(t(Key::SettingsProxyPortPlaceholder));
+            state.set_value(crate::text::fa_input(&proxy_port), window, cx);
+            state
+        });
+        let proxy_user_input = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::SettingsProxyUserPlaceholder)));
+        let proxy_pass_input = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::SettingsProxyPassPlaceholder)));
+        proxy_user_input.update(cx, |state, cx| state.set_value(proxy_user, window, cx));
+        proxy_pass_input.update(cx, |state, cx| state.set_value(proxy_pass, window, cx));
+        let props_url = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::PropsUrlPlaceholder)));
 
         let hwnd = crate::core::sys::HwndSlot::new();
         shell::remember_hwnd(window, &hwnd);
@@ -245,6 +282,7 @@ impl MainView {
         let mut view = Self {
             svc,
             pal: Palette::new(dark),
+            ui_lang_seen: ui_lang.clone(),
             page: Page::Downloads,
             filter: Category::All,
             list_filter: None,
@@ -260,6 +298,11 @@ impl MainView {
             search,
             limit_input,
             limit_custom: false,
+            formats_input,
+            proxy_host_input,
+            proxy_port_input,
+            proxy_user_input,
+            proxy_pass_input,
             props_id: None,
             props_copied: None,
             props_url,
@@ -334,7 +377,7 @@ impl MainView {
                 let kbps = if raw.is_empty() {
                     0
                 } else {
-                    raw.parse::<u64>().unwrap_or(0)
+                    crate::text::from_fa_digits(&raw).parse::<u64>().unwrap_or(0)
                 };
                 this.svc.apply(Command::SetLimitKbps(kbps));
                 // A typed value is the custom limit, even if it matches a
@@ -371,6 +414,14 @@ impl MainView {
                 if was_visible != this.visible {
                     crate::core::log::write(format!("window visible={}", this.visible));
                 }
+                let lang = this.svc.prefs().ui_lang.clone();
+                if lang != this.ui_lang_seen {
+                    this.ui_lang_seen = lang.clone();
+                    crate::i18n::apply(&lang);
+                    if let Some(tray) = this.tray.as_ref() {
+                        tray.relabel();
+                    }
+                }
                 let events = this.svc.tick();
                 this.handle_events(events, cx);
                 this.take_remote(cx);
@@ -395,7 +446,7 @@ impl MainView {
                 if let Some(clip) = this.clip.as_mut() {
                     clip.poll();
                 }
-                if this.visible {
+                if this.visible && this.page != Page::Settings {
                     cx.notify();
                 }
             });
@@ -441,7 +492,7 @@ impl MainView {
         for event in events {
             match event {
                 Event::Error(message) => {
-                    self.show_notice(message, true, cx);
+                    self.show_notice(i18n::error(&message), true, cx);
                 }
                 Event::ShutdownMachine => {
                     crate::app::force_shutdown();
@@ -469,8 +520,8 @@ impl MainView {
                         .iter()
                         .find(|s| s.id == id)
                         .map(|s| s.name.clone())
-                        .unwrap_or_else(|| "download".into());
-                    self.show_notice(format!("Added {name}"), false, cx);
+                        .unwrap_or_else(|| t(Key::CommonDownloadFallback).to_string());
+                    self.show_notice(tf(Key::ToastAddedOne, &[&name]), false, cx);
                     if self.svc.prefs().focus_new_download {
                         self.pending_focus = Some(id);
                     }
@@ -496,19 +547,25 @@ impl MainView {
             let Ok(batch) = self.remote_rx.try_recv() else {
                 return;
             };
-            if batch.urls.is_empty() {
+            let crate::core::server::RemoteBatch {
+                urls,
+                direct,
+                file_name,
+            } = batch;
+            if urls.is_empty() {
                 continue;
             }
-            if batch.direct {
+            if direct {
                 // Ctrl/Alt+click in the browser skips the review step. It
                 // still respects "Don't start immediately".
                 let dir = self.svc.save_dir();
                 let queued = self.svc.prefs().queued;
-                for url in batch.urls {
+                for (index, url) in urls.into_iter().enumerate() {
                     let events = self.svc.apply(Command::Add {
                         url,
                         dir: dir.clone(),
-                        file_name: None,
+                        file_name: if index == 0 { file_name.clone() } else { None },
+                        list: None,
                         queued,
                     });
                     self.handle_events(events, cx);
@@ -516,7 +573,7 @@ impl MainView {
             } else {
                 // Same review step as the egui build: nothing is queued until
                 // the user confirms the batch.
-                self.open_clip(batch.urls, "Chrome", cx);
+                self.open_clip(urls, t(Key::ClipSourceChrome), cx);
             }
             self.page = Page::Downloads;
             self.list_filter = None;
@@ -549,6 +606,7 @@ impl MainView {
     /// Persist download state through the engine interface, then leave the
     /// event loop.
     pub(crate) fn quit(&mut self, cx: &mut Context<Self>) {
+        self.flush_direct_formats(false, cx);
         self.quitting.store(true, Ordering::SeqCst);
         self.svc.apply(Command::Shutdown);
         cx.quit();
@@ -646,7 +704,7 @@ impl MainView {
         };
         div()
             .absolute()
-            .right(px(16.))
+            .edge_end(px(16.))
             .bottom(px(46.))
             .w(px(360.))
             .opacity(self.notice_alpha)
@@ -666,6 +724,7 @@ impl MainView {
                     .py(px(12.))
                     .flex()
                     .flex_row()
+                    .mirror()
                     .items_center()
                     .gap(px(10.))
                     .cursor_pointer()
@@ -694,6 +753,7 @@ impl MainView {
                             .min_w_0()
                             .text_sm()
                             .text_color(pal.text)
+                            .align_end()
                             .child(text),
                     ),
             )
@@ -730,6 +790,7 @@ impl MainView {
         let add_row = div()
             .flex()
             .flex_row()
+            .mirror()
             .items_center()
             .gap(px(10.))
             .child(
@@ -737,6 +798,7 @@ impl MainView {
                     .id("url-box")
                     .flex()
                     .flex_row()
+                    .mirror()
                     .items_center()
                     .gap(px(8.))
                     .flex_1()
@@ -758,8 +820,8 @@ impl MainView {
                 Button::new("paste")
                     .outline()
                     .icon(Icon::new(IconName::Copy).text_color(pal.accent))
-                    .label("Clipboard")
-                    .tooltip("Get links from the clipboard")
+                    .label(t(Key::ToolbarClipboard))
+                    .tooltip(t(Key::ToolbarClipboardTip))
                     .on_click(cx.listener(|this, _, window, cx| this.paste(window, cx))),
             )
             // A hand-drawn switch: the kit `Switch` swallowed these clicks.
@@ -768,6 +830,7 @@ impl MainView {
                     .id("queue-toggle")
                     .flex()
                     .flex_row()
+                    .mirror()
                     .items_center()
                     .gap(px(7.))
                     .h(px(30.))
@@ -800,21 +863,21 @@ impl MainView {
                                     .size(px(10.))
                                     .rounded_full()
                                     .bg(if queued { pal.bg } else { pal.muted })
-                                    .ml(px(if queued { 16. } else { 2. })),
+                                    .ml(px(crate::rtl::switch_thumb_ml(queued))),
                             ),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(if queued { pal.text } else { pal.muted })
-                            .child("Don't start immediately"),
+                            .child(t(Key::ToolbarQueue)),
                     ),
             )
             .child(
                 Button::new("add")
                     .primary()
                     .icon(IconName::ArrowDown)
-                    .label("Download")
+                    .label(t(Key::ToolbarDownload))
                     .disabled(!typed)
                     .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
             );
@@ -822,6 +885,7 @@ impl MainView {
         let actions = div()
             .flex()
             .flex_row()
+            .mirror()
             .items_center()
             .gap(px(8.))
             .child(
@@ -829,14 +893,14 @@ impl MainView {
                     .custom(action_style)
                     .icon(Icon::new(IconName::Play).text_color(pal.ok))
                     .label(if has_selection {
-                        "Start".to_string()
+                        t(Key::ToolbarStart).to_string()
                     } else {
-                        "Start list".to_string()
+                        t(Key::ToolbarStartList).to_string()
                     })
                     .tooltip(if has_selection {
-                        "Start the selected downloads"
+                        t(Key::ToolbarStartSelectedTip)
                     } else {
-                        "Start all downloads in this list or view"
+                        t(Key::ToolbarStartAllTip)
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
                         let ids = this.action_ids();
@@ -853,14 +917,14 @@ impl MainView {
                     .custom(action_style)
                     .icon(Icon::new(IconName::Pause).text_color(pal.warn))
                     .label(if has_selection {
-                        "Pause".to_string()
+                        t(Key::ToolbarPause).to_string()
                     } else {
-                        "Pause list".to_string()
+                        t(Key::ToolbarPauseList).to_string()
                     })
                     .tooltip(if has_selection {
-                        "Pause the selected downloads"
+                        t(Key::ToolbarPauseSelectedTip)
                     } else {
-                        "Pause all downloads in this list or view"
+                        t(Key::ToolbarPauseAllTip)
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
                         let ids = this.action_ids();
@@ -877,20 +941,20 @@ impl MainView {
                     .custom(action_style)
                     .icon(Icon::new(IconName::Delete).text_color(pal.bad))
                     .label(if has_selection {
-                        "Delete".to_string()
+                        t(Key::ToolbarDelete).to_string()
                     } else {
-                        "Delete all from list".to_string()
+                        t(Key::ToolbarDeleteAll).to_string()
                     })
                     .tooltip(if has_selection {
-                        "Delete the selected downloads"
+                        t(Key::ToolbarDeleteSelectedTip)
                     } else {
-                        "Delete all downloads in this list or view"
+                        t(Key::ToolbarDeleteAllTip)
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
                         let ids = this.action_ids();
                         if ids.is_empty() {
                             this.show_notice(
-                                "Nothing to delete in this view".into(),
+                                t(Key::ToolbarNothingToDelete).to_string(),
                                 true,
                                 cx,
                             );
@@ -907,7 +971,7 @@ impl MainView {
                 Button::new("up")
                     .custom(action_style)
                     .icon(Icon::new(IconName::ArrowUp).text_color(move_color))
-                    .tooltip("Move the selected downloads up the queue")
+                    .tooltip(t(Key::ToolbarMoveUpTip))
                     .disabled(!can_move)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.move_selected(true);
@@ -918,7 +982,7 @@ impl MainView {
                 Button::new("down")
                     .custom(action_style)
                     .icon(Icon::new(IconName::ArrowDown).text_color(move_color))
-                    .tooltip("Move the selected downloads down the queue")
+                    .tooltip(t(Key::ToolbarMoveDownTip))
                     .disabled(!can_move)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.move_selected(false);
@@ -929,7 +993,7 @@ impl MainView {
                 Button::new("add-to-list")
                     .custom(action_style)
                     .icon(Icon::new(IconName::Inbox).text_color(list_color))
-                    .label("List")
+                    .label(t(Key::ToolbarList))
                     .disabled(!has_selection)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.pick_list_dialog(window, cx);
@@ -955,6 +1019,7 @@ impl MainView {
                         div()
                             .flex()
                             .flex_row()
+                            .mirror()
                             .items_center()
                             .justify_between()
                             .gap(px(12.))
@@ -964,6 +1029,7 @@ impl MainView {
                                     .id("search-box")
                                     .flex()
                                     .flex_row()
+                                    .mirror()
                                     .items_center()
                                     .gap(px(6.))
                                     .w(px(230.))
@@ -1033,8 +1099,13 @@ impl MainView {
             .size_full()
             .occlude()
             .cursor_col_resize()
-            .on_mouse_move(move |event, _, cx: &mut App| {
+            .on_mouse_move(move |event, window, cx: &mut App| {
                 let x = event.position.x.as_f32();
+                let x = if crate::rtl::on() {
+                    window.viewport_size().width.as_f32() - x
+                } else {
+                    x
+                };
                 let still_down = event.pressed_button == Some(MouseButton::Left);
                 weak_move
                     .update(cx, |this, cx| {
@@ -1085,20 +1156,27 @@ impl MainView {
         let conns: u32 = active.iter().map(|s| s.connections).sum();
         let limit = self.svc.prefs().limit_kbps;
 
-        let mut left = format!(
-            "{all} files  ·  {} active  ·  {conns} connections",
-            active.len()
+        let mut left = tf(
+            Key::StatusBarCounts,
+            &[
+                &ltr_isolate(&all.to_string()),
+                &ltr_isolate(&active.len().to_string()),
+                &ltr_isolate(&conns.to_string()),
+            ],
         );
         if limit > 0 {
-            left.push_str(&format!(
-                "  ·  Limit {}",
-                crate::format::fmt_speed(limit * 1024)
+            left.push_str(&tf(
+                Key::StatusBarLimit,
+                &[&ltr_isolate(&crate::format::fmt_speed(limit * 1024))],
             ));
         }
         let right = if speed > 0 {
-            format!("Total {}", crate::format::fmt_speed(speed))
+            tf(
+                Key::StatusBarTotal,
+                &[&ltr_isolate(&crate::format::fmt_speed(speed))],
+            )
         } else {
-            "Idle".to_string()
+            t(Key::StatusBarIdle).to_string()
         };
         // Free space on the volume that holds new downloads.
         let dir = self.svc.save_dir();
@@ -1109,6 +1187,7 @@ impl MainView {
             div()
                 .flex()
                 .flex_row()
+                .mirror()
                 .items_center()
                 .gap(px(8.))
                 .px(px(8.))
@@ -1139,68 +1218,80 @@ impl MainView {
                         ),
                 )
                 .child(
-                    div().text_color(pal.muted).child(format!(
-                        "{} free of {}",
-                        crate::format::fmt_bytes(free),
-                        crate::format::fmt_bytes(total)
+                    div().text_color(pal.muted).child(tf(
+                        Key::StatusBarDiskFree,
+                        &[
+                            &ltr_isolate(&crate::format::fmt_bytes(free)),
+                            &ltr_isolate(&crate::format::fmt_bytes(total)),
+                        ],
                     )),
                 )
         });
-        div()
+        let idle = {
+            let d = div()
+                .w(px(110.))
+                .flex_shrink_0()
+                .text_color(if speed > 0 { pal.accent } else { pal.muted });
+            if crate::rtl::on() {
+                d.child(right)
+            } else {
+                d.text_right().child(right)
+            }
+        };
+        let tools = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(12.))
+            .children(disk)
+            .child(
+                Button::new("open-logs")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::FileText)
+                    .tooltip(t(Key::StatusBarLogsTip))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_logs_window(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("open-app-folder")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::FolderOpen)
+                    .tooltip(t(Key::StatusBarAppFolderTip))
+                    .on_click({
+                        let dir = app_dir.clone();
+                        move |_, _, cx: &mut App| {
+                            open_in_background(dir.clone(), cx);
+                        }
+                    }),
+            );
+        let counts = div().text_xs().text_color(pal.muted).child(left);
+        let bar = div()
             .h(px(34.))
             .flex()
             .flex_row()
             .items_center()
-            .justify_between()
             .px(px(20.))
             .border_t_1()
             .border_color(pal.line)
             .bg(pal.panel)
             .text_xs()
-            .text_color(pal.muted)
-            .child(left)
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(12.))
-                    .children(disk)
-                    .child(
-                        Button::new("open-logs")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::FileText)
-                            .tooltip("Show the debug log")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_logs_window(window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("open-app-folder")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::FolderOpen)
-                            .tooltip("Open the app folder")
-                            .on_click({
-                                let dir = app_dir.clone();
-                                move |_, _, cx: &mut App| {
-                                    open_in_background(dir.clone(), cx);
-                                }
-                            }),
-                    )
-                    // Fixed width keeps the free-space card from shifting when
-                    // the speed text changes size.
-                    .child(
-                        div()
-                            .w(px(110.))
-                            .flex_shrink_0()
-                            .text_right()
-                            .text_color(if speed > 0 { pal.accent } else { pal.muted })
-                            .child(right),
-                    ),
-            )
-            .into_any_element()
+            .text_color(pal.muted);
+        if crate::rtl::on() {
+            bar.child(idle)
+                .child(tools)
+                .child(div().flex_1())
+                .child(counts)
+                .into_any_element()
+        } else {
+            bar.child(counts)
+                .child(div().flex_1())
+                .child(tools)
+                .child(idle)
+                .into_any_element()
+        }
     }
 
     // --- commands -------------------------------------------------------
@@ -1208,7 +1299,7 @@ impl MainView {
     pub(crate) fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let url = self.url.read(cx).value().trim().to_string();
         if url.is_empty() {
-            self.show_notice("Paste an http(s) URL first".into(), true, cx);
+            self.show_notice(t(Key::AddEmptyUrl).to_string(), true, cx);
             return;
         }
         if let Some(existing) = self.svc.unfinished_duplicate(&url) {
@@ -1231,6 +1322,7 @@ impl MainView {
             url,
             dir,
             file_name,
+            list: None,
             queued,
         });
         self.handle_events(events, cx);
@@ -1252,22 +1344,23 @@ impl MainView {
             let weak_ok = weak.clone();
             let url_ok = url.clone();
             dialog
-                .title("Already in the list")
-                .child(div().text_sm().text_color(pal.muted).child(format!(
-                    "{existing} is still downloading from this address. Add another copy?"
+                .title(t(Key::DupTitle))
+                .child(div().text_sm().text_color(pal.muted).child(tf(
+                    Key::DupBody,
+                    &[&existing],
                 )))
                 .footer(
                     DialogFooter::new()
                         .child(
                             Button::new("dup-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(t(Key::CommonCancel))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("dup-add")
                                 .primary()
-                                .label("Add anyway")
+                                .label(t(Key::DupAddAnyway))
                                 .on_click(move |_, window, cx| {
                                     let url = url_ok.clone();
                                     weak_ok
@@ -1303,6 +1396,7 @@ impl MainView {
                         .id(ElementId::Name(format!("pick-{name}").into()))
                         .flex()
                         .flex_row()
+                        .mirror()
                         .items_center()
                         .gap(px(8.))
                         .px(px(8.))
@@ -1332,13 +1426,13 @@ impl MainView {
                 );
             }
             dialog
-                .title("Add to list")
+                .title(t(Key::ListPickTitle))
                 .child(rows)
                 .footer(
                     DialogFooter::new().child(
                         Button::new("pick-cancel")
                             .outline()
-                            .label("Cancel")
+                            .label(t(Key::CommonCancel))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )
@@ -1386,22 +1480,36 @@ impl MainView {
             .collect();
         let editable_url = snap.status == Status::Paused;
         let type_label = file_type_label(&snap.name);
-        let status_label = crate::format::status_text(&snap);
+        let status_label = i18n::status_label(snap.status).to_string();
         let size = match snap.total {
-            Some(t) => format!("{} ({} bytes)", crate::format::fmt_bytes(t), t),
-            None => format!("{} so far", crate::format::fmt_bytes(snap.received)),
+            Some(t) => tf(
+                Key::PropsSizeKnown,
+                &[
+                    &ltr_isolate(&crate::format::fmt_bytes(t)),
+                    &ltr_isolate(&t.to_string()),
+                ],
+            ),
+            None => tf(
+                Key::PropsSizeUnknown,
+                &[&ltr_isolate(&crate::format::fmt_bytes(snap.received))],
+            ),
         };
         let progress = match snap.total.filter(|t| *t > 0) {
-            Some(_) => format!("{:.1}%", snap.received as f64 / snap.total.unwrap() as f64 * 100.0),
-            None => "—".to_string(),
+            Some(_) => ltr_isolate(&format!(
+                "{:.1}%",
+                snap.received as f64 / snap.total.unwrap() as f64 * 100.0
+            )),
+            None => t(Key::CommonEmDash).to_string(),
         };
         let downloaded = match snap.total {
-            Some(t) => format!(
-                "{} of {}",
-                crate::format::fmt_bytes(snap.received),
-                crate::format::fmt_bytes(t)
+            Some(t) => tf(
+                Key::PropsDownloadedOf,
+                &[
+                    &ltr_isolate(&crate::format::fmt_bytes(snap.received)),
+                    &ltr_isolate(&crate::format::fmt_bytes(t)),
+                ],
             ),
-            None => crate::format::fmt_bytes(snap.received),
+            None => ltr_isolate(&crate::format::fmt_bytes(snap.received)),
         };
         let save_to = snap.dest.to_string_lossy().into_owned();
         let name = snap.name.clone();
@@ -1413,17 +1521,17 @@ impl MainView {
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| snap.dest.clone())
         };
-        let mut rows: Vec<(&'static str, String, bool, Hsla)> = vec![
-            ("Type", type_label.clone(), false, pal.text),
-            ("Status", status_label, false, pal.status(snap.status)),
-            ("Size", size, false, pal.text),
-            ("Save To", save_to, true, pal.text),
-            ("Downloaded", downloaded, false, pal.text),
-            ("Progress", progress, false, pal.text),
+        let mut rows: Vec<(String, String, bool, Hsla)> = vec![
+            (t(Key::PropsType), type_label.clone(), false, pal.text),
+            (t(Key::PropsStatus), status_label, false, pal.status(snap.status)),
+            (t(Key::PropsSize), size, false, pal.text),
+            (t(Key::PropsSaveTo), save_to, true, pal.text),
+            (t(Key::PropsDownloaded), downloaded, false, pal.text),
+            (t(Key::PropsProgress), progress, false, pal.text),
             (
-                "Lists",
+                t(Key::PropsLists),
                 if lists.is_empty() {
-                    "—".to_string()
+                    t(Key::CommonEmDash).to_string()
                 } else {
                     lists.join(", ")
                 },
@@ -1432,20 +1540,20 @@ impl MainView {
             ),
         ];
         if let Some(err) = snap.error.clone() {
-            rows.push(("Error", err, false, pal.bad));
+            rows.push((t(Key::PropsError), i18n::error(&err), false, pal.bad));
         }
         if snap.active_ms > 0 {
             let seconds = (snap.active_ms as f64 / 1000.0).max(0.001);
             let average = (snap.received as f64 / seconds) as u64;
             rows.push((
-                "Download time",
-                crate::format::fmt_duration(snap.active_ms),
+                t(Key::PropsDownloadTime),
+                ltr_isolate(&crate::format::fmt_duration(snap.active_ms)),
                 false,
                 pal.text,
             ));
             rows.push((
-                "Average speed",
-                crate::format::fmt_speed(average),
+                t(Key::PropsAverageSpeed),
+                ltr_isolate(&crate::format::fmt_speed(average)),
                 false,
                 pal.text,
             ));
@@ -1468,6 +1576,7 @@ impl MainView {
                     div()
                         .flex()
                         .flex_row()
+                        .mirror()
                         .items_center()
                         .gap(px(10.))
                         .w_full()
@@ -1497,7 +1606,7 @@ impl MainView {
                                         .text_sm()
                                         .font_semibold()
                                         .text_color(pal.text)
-                                        .text_ellipsis()
+                                        .ellipsize_ui()
                                         .child(name.clone()),
                                 ),
                         ),
@@ -1505,7 +1614,7 @@ impl MainView {
                 .child(div().h(px(1.)).w_full().bg(pal.line));
             for (label, value, copyable, color) in rows.iter() {
                 body = body.child(property_row(
-                    *label,
+                    label.clone(),
                     value.clone(),
                     *color,
                     *copyable,
@@ -1513,13 +1622,12 @@ impl MainView {
                     weak.clone(),
                     pal,
                 ));
-                // The address is editable while the download is paused.
-                if *label == "Save To" {
+                if label.as_str() == t(Key::PropsSaveTo).as_str() {
                     body = body.child(address_row(
                         url_input.clone(),
                         editable_url,
                         url_error.clone(),
-                        copied.as_deref() == Some("Address"),
+                        copied.as_deref() == Some(t(Key::PropsAddress).as_str()),
                         weak.clone(),
                         id.clone(),
                         pal,
@@ -1527,7 +1635,7 @@ impl MainView {
                 }
             }
             dialog
-                .title("File Properties")
+                .title(t(Key::PropsTitle))
                 .width(px(560.))
                 .child(body)
                 .footer(
@@ -1535,7 +1643,7 @@ impl MainView {
                         .child(
                             Button::new("props-open")
                                 .outline()
-                                .label("Open")
+                                .label(t(Key::CommonOpen))
                                 .on_click({
                                     let target = open_target.clone();
                                     move |_, _, cx: &mut App| {
@@ -1546,7 +1654,7 @@ impl MainView {
                         .child(
                             Button::new("props-ok")
                                 .primary()
-                                .label("OK")
+                                .label(t(Key::CommonOk))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         ),
                 )
@@ -1563,7 +1671,7 @@ impl MainView {
     ) {
         let url = url.trim().to_string();
         if url.is_empty() {
-            self.props_url_error = Some("Enter an address first.".into());
+            self.props_url_error = Some(t(Key::PropsUrlEmpty).to_string());
             cx.notify();
             return;
         }
@@ -1573,7 +1681,7 @@ impl MainView {
                 self.props_url
                     .update(cx, |state, cx| state.set_value(url, window, cx));
             }
-            Err(e) => self.props_url_error = Some(e),
+            Err(e) => self.props_url_error = Some(i18n::error(&e)),
         }
         cx.notify();
     }
@@ -1616,6 +1724,7 @@ impl MainView {
                             url: snap.url.clone(),
                             dir,
                             file_name: Some(snap.name.clone()),
+                            list: None,
                             queued,
                         });
                         this.handle_events(events, cx);
@@ -1626,7 +1735,7 @@ impl MainView {
                 }
             };
             dialog
-                .title("Download again?")
+                .title(t(Key::RedlTitle))
                 .width(px(470.))
                 .child(
                     div()
@@ -1639,19 +1748,15 @@ impl MainView {
                                 .text_sm()
                                 .text_color(pal.text)
                                 .child(if keep {
-                                    format!(
-                                        "A new copy of “{name}” will be downloaded next to the existing file."
-                                    )
+                                    tf(Key::RedlKeepBody, &[&name])
                                 } else {
-                                    format!(
-                                        "The existing “{name}” will be deleted and downloaded again."
-                                    )
+                                    tf(Key::RedlReplaceBody, &[&name])
                                 }),
                         )
                         .child(
                             Checkbox::new("redl-keep")
                                 .checked(keep)
-                                .label("Keep the old file")
+                                .label(t(Key::RedlKeep))
                                 .on_click(move |on: &bool, _, cx: &mut App| {
                                     let on = *on;
                                     weak_toggle
@@ -1668,13 +1773,13 @@ impl MainView {
                         .child(
                             Button::new("redl-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(t(Key::CommonCancel))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("redl-ok")
                                 .primary()
-                                .label("Download again")
+                                .label(t(Key::RedlConfirm))
                                 .on_click(move |_, window, cx| start(window, cx)),
                         ),
                 )
@@ -1709,7 +1814,7 @@ impl MainView {
                 div()
                     .id("logo-menu-card")
                     .absolute()
-                    .left(px(14.))
+                    .edge_start(px(14.))
                     .top(px(74.))
                     .w(px(240.))
                     .rounded(px(10.))
@@ -1728,7 +1833,7 @@ impl MainView {
                     .on_click(|_, _, cx: &mut App| cx.stop_propagation())
                     .child(logo_menu_item(
                         gpui_kit::assets::IconName::BookOpen,
-                        "User guide",
+                        t(Key::MenuUserGuide),
                         pal.accent,
                         pal,
                         weak.clone(),
@@ -1736,7 +1841,7 @@ impl MainView {
                     ))
                     .child(logo_menu_item(
                         gpui_kit::assets::IconName::Info,
-                        "About",
+                        t(Key::MenuAbout),
                         pal.info,
                         pal,
                         weak.clone(),
@@ -1744,7 +1849,7 @@ impl MainView {
                     ))
                     .child(logo_menu_item(
                         gpui_kit::assets::IconName::RefreshCw,
-                        "Check for update",
+                        t(Key::MenuCheckUpdate),
                         pal.warn,
                         pal,
                         weak.clone(),
@@ -1753,7 +1858,7 @@ impl MainView {
                     .child(div().h(px(1.)).mx(px(6.)).my(px(4.)).bg(pal.line))
                     .child(logo_menu_item(
                         gpui_kit::assets::IconName::WindowClose,
-                        "Exit",
+                        t(Key::MenuExit),
                         pal.bad,
                         pal,
                         weak,
@@ -1775,7 +1880,7 @@ impl MainView {
         let video = dir.join("install extension guide.mp4");
         window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
-                .title("User guide")
+                .title(t(Key::GuideTitle))
                 .width(px(540.))
                 .child(
                     div()
@@ -1787,8 +1892,8 @@ impl MainView {
                             "en",
                             gpui_kit::assets::IconName::BookOpenText,
                             pal.accent,
-                            "English guide",
-                            "DVIDM user guide (PDF)",
+                            t(Key::GuideEnTitle),
+                            t(Key::GuideEnSub),
                             pal,
                             weak.clone(),
                             en.clone(),
@@ -1797,8 +1902,8 @@ impl MainView {
                             "fa",
                             gpui_kit::assets::IconName::Languages,
                             pal.info,
-                            "Persian guide",
-                            "Persian user guide (PDF)",
+                            t(Key::GuideFaTitle),
+                            t(Key::GuideFaSub),
                             pal,
                             weak.clone(),
                             fa.clone(),
@@ -1807,8 +1912,8 @@ impl MainView {
                             "video",
                             gpui_kit::assets::IconName::FilePlay,
                             pal.warn,
-                            "Install extension",
-                            "Video: install extension guide.mp4",
+                            t(Key::GuideVideoTitle),
+                            t(Key::GuideVideoSub),
                             pal,
                             weak.clone(),
                             video.clone(),
@@ -1817,7 +1922,7 @@ impl MainView {
                 .footer(DialogFooter::new().child(
                     Button::new("guide-close")
                         .outline()
-                        .label("Close")
+                        .label(t(Key::CommonClose))
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 ))
         });
@@ -1827,7 +1932,7 @@ impl MainView {
         let pal = self.pal;
         window.open_dialog(cx, move |dialog, _window, _cx| {
             dialog
-                .title("About DVIDM")
+                .title(t(Key::AboutTitle))
                 .width(px(440.))
                 .child(
                     div()
@@ -1839,28 +1944,25 @@ impl MainView {
                                 .text_sm()
                                 .font_semibold()
                                 .text_color(pal.text)
-                                .child(format!(
-                                    "DV Internet Download Manager {}",
-                                    env!("CARGO_PKG_VERSION")
-                                )),
+                                .child(tf(Key::AboutNameVersion, &[env!("CARGO_PKG_VERSION")])),
                         )
                         .child(
                             div()
                                 .text_sm()
                                 .text_color(pal.muted)
-                                .child("Segmented downloads, lists, scheduling and browser integration."),
+                                .child(t(Key::AboutBlurb)),
                         )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(pal.muted)
-                                .child("English and Persian guides, plus the extension video, are in the User guide menu."),
+                                .child(t(Key::AboutGuides)),
                         ),
                 )
                 .footer(DialogFooter::new().child(
                     Button::new("about-ok")
                         .primary()
-                        .label("OK")
+                        .label(t(Key::CommonOk))
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 ))
         });
@@ -1964,32 +2066,26 @@ impl MainView {
                 UpdateCheck::Available { version, download, .. } => (
                     gpui_kit::assets::IconName::CircleArrowUp,
                     pal.warn,
-                    format!("DVIDM {version} is available"),
+                    tf(Key::UpdateAvailableTitle, &[version]),
                     match download {
-                        Some(_) => format!(
-                            "You are running {current}. The new installer can be downloaded now."
-                        ),
-                        None => format!(
-                            "You are running {current}. Open the release page to download it."
-                        ),
+                        Some(_) => tf(Key::UpdateAvailableMsi, &[current]),
+                        None => tf(Key::UpdateAvailablePage, &[current]),
                     },
                 ),
                 UpdateCheck::UpToDate { latest, .. } => (
                     gpui_kit::assets::IconName::CircleCheck,
                     pal.ok,
-                    "You're up to date".to_string(),
+                    t(Key::UpdateUpToDateTitle).to_string(),
                     if latest.as_str() == current {
-                        format!("DVIDM {current} is the latest published release.")
+                        tf(Key::UpdateUpToDateSame, &[current])
                     } else {
-                        format!(
-                            "You are running DVIDM {current}; the latest published release is {latest}."
-                        )
+                        tf(Key::UpdateUpToDateOther, &[current, latest])
                     },
                 ),
                 UpdateCheck::Failed(err) => (
                     gpui_kit::assets::IconName::CircleAlert,
                     pal.bad,
-                    "Could not check for updates".to_string(),
+                    t(Key::UpdateFailedTitle).to_string(),
                     short_error(err),
                 ),
             };
@@ -2005,7 +2101,7 @@ impl MainView {
                     footer = footer.child(
                         Button::new("update-page")
                             .outline()
-                            .label("Release page")
+                            .label(t(Key::UpdateReleasePage))
                             .on_click(move |_, window, cx| {
                                 open_url_in_background(page_url.clone(), cx);
                                 window.close_dialog(cx);
@@ -2018,7 +2114,7 @@ impl MainView {
                         footer = footer.child(
                             Button::new("update-get")
                                 .primary()
-                                .label("Download installer")
+                                .label(t(Key::UpdateDownloadInstaller))
                                 .on_click(move |_, window, cx| {
                                     weak_download
                                         .update(cx, |this, cx| {
@@ -2037,7 +2133,7 @@ impl MainView {
                         footer = footer.child(
                             Button::new("update-get")
                                 .primary()
-                                .label("Open release page")
+                                .label(t(Key::UpdateOpenRelease))
                                 .on_click(move |_, window, cx| {
                                     open_url_in_background(url.clone(), cx);
                                     window.close_dialog(cx);
@@ -2051,7 +2147,7 @@ impl MainView {
                         .child(
                             Button::new("update-notes")
                                 .outline()
-                                .label("Release notes")
+                                .label(t(Key::UpdateReleaseNotes))
                                 .on_click(move |_, window, cx| {
                                     open_url_in_background(page_url.clone(), cx);
                                     window.close_dialog(cx);
@@ -2060,7 +2156,7 @@ impl MainView {
                         .child(
                             Button::new("update-close")
                                 .primary()
-                                .label("Close")
+                                .label(t(Key::CommonClose))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         );
                 }
@@ -2070,13 +2166,13 @@ impl MainView {
                         .child(
                             Button::new("update-close")
                                 .outline()
-                                .label("Close")
+                                .label(t(Key::CommonClose))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("update-retry")
                                 .primary()
-                                .label("Try again")
+                                .label(t(Key::CommonTryAgain))
                                 .on_click(move |_, window, cx| {
                                     weak_retry
                                         .update(cx, |this, cx| this.check_for_update(window, cx))
@@ -2087,7 +2183,7 @@ impl MainView {
             }
 
             dialog
-                .title("Check for updates")
+                .title(t(Key::UpdateDialogTitle))
                 .width(px(500.))
                 .child(update_dialog_body(icon, tone, title, detail, pal))
                 .footer(footer)
@@ -2106,13 +2202,12 @@ impl MainView {
         let weak = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _window, _cx| {
             let message = if active > 0 {
-                format!("{active} download(s) are still running. Exit completely and stop them?")
+                tf(Key::ExitRunning, &[&ltr_isolate(&active.to_string())])
             } else {
-                "Exit DVIDM completely? It will close the window and remove the tray icon."
-                    .to_string()
+                t(Key::ExitIdle).to_string()
             };
             dialog
-                .title("Exit DVIDM?")
+                .title(t(Key::ExitTitle))
                 .width(px(450.))
                 .child(div().text_sm().text_color(pal.text).child(message))
                 .footer(
@@ -2120,13 +2215,13 @@ impl MainView {
                         .child(
                             Button::new("exit-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(t(Key::CommonCancel))
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("exit-ok")
                                 .danger()
-                                .label("Exit")
+                                .label(t(Key::CommonExit))
                                 .on_click({
                                     let weak = weak.clone();
                                     move |_, window, cx| {
@@ -2144,7 +2239,7 @@ impl MainView {
     fn show_toast(&mut self, name: String, cx: &mut Context<Self>) {
         let pal = self.pal;
         self.show_notification(
-            "Download complete".into(),
+            t(Key::ToastCompleteTitle).to_string(),
             name,
             gpui_kit::assets::IconName::CircleCheck,
             pal.ok,
@@ -2167,6 +2262,7 @@ impl MainView {
             url,
             dir,
             file_name: Some(format!("DVIDM-Setup-{version}.msi")),
+            list: None,
             queued: false,
         });
         self.handle_events(events, cx);
@@ -2186,8 +2282,8 @@ impl MainView {
             url,
         };
         self.show_notification(
-            "Update available".into(),
-            format!("DVIDM {version} is ready. Click to download."),
+            t(Key::ToastUpdateTitle).to_string(),
+            tf(Key::ToastUpdateBody, &[&version]),
             gpui_kit::assets::IconName::CircleArrowUp,
             pal.warn,
             Some(action),
@@ -2291,7 +2387,7 @@ impl MainView {
             })),
             window_min_size: Some(size(px(520.), px(320.))),
             titlebar: Some(TitlebarOptions {
-                title: Some("DVIDM Debug Log".into()),
+                title: Some(t(Key::LogsWindowTitle).into()),
                 appears_transparent: false,
                 traffic_light_position: None,
             }),
@@ -2309,7 +2405,7 @@ impl MainView {
             Ok((handle, _view)) => self.log_window = Some(handle),
             Err(err) => {
                 self.show_notice(
-                    format!("Could not open the log window: {err:#}"),
+                    tf(Key::LogsOpenFailed, &[&format!("{err:#}")]),
                     true,
                     cx,
                 );
@@ -2325,22 +2421,23 @@ impl MainView {
         let text = if limit == 0 {
             String::new()
         } else {
-            limit.to_string()
+            crate::text::fa_input(&limit.to_string())
         };
         self.limit_input
             .update(cx, |state, cx| state.set_value(text, window, cx));
+        self.sync_formats_input(window, cx);
         cx.notify();
     }
 
     pub(crate) fn paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(text) = crate::clipboard::read_text() else {
-            self.show_notice("Clipboard is empty or busy".into(), true, cx);
+            self.show_notice(t(Key::ClipEmpty).to_string(), true, cx);
             return;
         };
         let urls = crate::clipboard::extract_urls(&text);
         match urls.len() {
             0 => {
-                self.show_notice("No http(s) links in the clipboard".into(), true, cx);
+                self.show_notice(t(Key::ClipNoLinks).to_string(), true, cx);
             }
             1 => {
                 let url = urls.into_iter().next().unwrap();
@@ -2348,14 +2445,14 @@ impl MainView {
                     .update(cx, |state, cx| state.set_value(url, window, cx));
             }
             _ => {
-                self.open_clip(urls, "clipboard", cx);
+                self.open_clip(urls, t(Key::ClipSourceClipboard), cx);
             }
         }
         cx.notify();
     }
 
     /// Start (or extend) a review of links that arrived together.
-    pub(crate) fn open_clip(&mut self, urls: Vec<String>, source: &'static str, cx: &mut Context<Self>) {
+    pub(crate) fn open_clip(&mut self, urls: Vec<String>, source: impl Into<String>, cx: &mut Context<Self>) {
         if urls.is_empty() {
             return;
         }
@@ -2396,7 +2493,7 @@ impl MainView {
             .map(|i| i.url.clone())
             .collect();
         if urls.is_empty() {
-            self.show_notice("No links selected".into(), true, cx);
+            self.show_notice(t(Key::ClipNoneSelected).to_string(), true, cx);
             return;
         }
         let dir = self.svc.save_dir();
@@ -2408,6 +2505,7 @@ impl MainView {
                 url,
                 dir: dir.clone(),
                 file_name: None,
+                list: self.clip_list.clone(),
                 queued,
             });
             for ev in events {
@@ -2427,8 +2525,12 @@ impl MainView {
             }
         }
         match failures.last() {
-            Some(e) => self.show_notice(e.clone(), true, cx),
-            None => self.show_notice(format!("Added {} link(s)", added.len()), false, cx),
+            Some(e) => self.show_notice(i18n::error(e), true, cx),
+            None => self.show_notice(
+                tf(Key::ToastAddedMany, &[&ltr_isolate(&added.len().to_string())]),
+                false,
+                cx,
+            ),
         }
         self.page = Page::Downloads;
         self.url
@@ -2447,6 +2549,7 @@ impl MainView {
             .items_center()
             .justify_center()
             .bg(crate::theme::alpha(0x000000, 0.55))
+            .occlude()
             .child(card)
             .into_any_element()
     }
@@ -2463,6 +2566,7 @@ impl MainView {
             .bg(self.pal.card)
             .border_1()
             .border_color(self.pal.line)
+            .occlude()
     }
 
     /// Clipboard / Chrome import: one card per link with its probed size, a
@@ -2472,7 +2576,7 @@ impl MainView {
         let Some(clip) = self.clip.as_ref() else {
             return div().into_any_element();
         };
-        let source = clip.source;
+        let source = clip.source.clone();
         let count = clip.items.len();
         let selected = clip.items.iter().filter(|i| i.selected).count();
         let known: u64 = clip.items.iter().filter_map(|i| i.size).sum();
@@ -2504,6 +2608,7 @@ impl MainView {
         let header = div()
             .flex()
             .flex_row()
+            .mirror()
             .items_center()
             .justify_between()
             .child(
@@ -2516,17 +2621,19 @@ impl MainView {
                             .text_xl()
                             .font_semibold()
                             .text_color(pal.text)
-                            .child(format!("From {source}")),
+                            .child(tf(Key::ClipTitle, &[source.as_str()])),
                     )
                     .child(
-                        div().text_sm().text_color(pal.muted).child(format!(
-                            "{count} links found{}",
+                        div().text_sm().text_color(pal.muted).child({
+                            let mut s = tf(Key::ClipFound, &[&ltr_isolate(&count.to_string())]);
                             if known > 0 {
-                                format!(" · {}", crate::format::fmt_bytes(known))
-                            } else {
-                                String::new()
+                                s.push_str(&tf(
+                                    Key::ClipFoundSize,
+                                    &[&ltr_isolate(&crate::format::fmt_bytes(known))],
+                                ));
                             }
-                        )),
+                            s
+                        }),
                     ),
             )
             .child({
@@ -2545,12 +2652,14 @@ impl MainView {
             div()
                 .flex()
                 .flex_row()
+                .mirror()
                 .items_center()
                 .justify_between()
                 .child(
                     div()
                         .flex()
                         .flex_row()
+                        .mirror()
                         .items_center()
                         .gap(px(8.))
                         .child(
@@ -2573,12 +2682,21 @@ impl MainView {
                                 },
                             ),
                         )
-                        .child(div().text_sm().text_color(pal.text).child("Select all")),
+                        .child(div().text_sm().text_color(pal.text).child(t(Key::ClipSelectAll))),
                 )
-                .child(div().text_xs().text_color(pal.muted).child(format!(
-                    "{selected}/{count} selected{}",
-                    if loading { " · checking sizes" } else { "" }
-                )))
+                .child(div().text_xs().text_color(pal.muted).child({
+                    let mut s = tf(
+                        Key::ClipSelectedFrac,
+                        &[
+                            &ltr_isolate(&selected.to_string()),
+                            &ltr_isolate(&count.to_string()),
+                        ],
+                    );
+                    if loading {
+                        s.push_str(&t(Key::ClipCheckingSizes));
+                    }
+                    s
+                }))
         };
 
         let mut rows = div()
@@ -2591,18 +2709,19 @@ impl MainView {
         for (i, name, size, item_loading, error, is_selected) in items {
             let weak_toggle = weak.clone();
             let (size_text, size_color) = if let Some(e) = error {
-                (e, pal.bad)
+                (i18n::error(&e), pal.bad)
             } else if item_loading {
-                ("Checking…".to_string(), pal.muted)
+                (t(Key::ClipChecking).to_string(), pal.muted)
             } else if let Some(bytes) = size {
-                (crate::format::fmt_bytes(bytes), pal.ok)
+                (ltr_isolate(&crate::format::fmt_bytes(bytes)), pal.ok)
             } else {
-                ("Ready".to_string(), pal.ok)
+                (t(Key::ClipReady).to_string(), pal.ok)
             };
             rows = rows.child(
                 div()
                     .flex()
                     .flex_row()
+                    .mirror()
                     .items_center()
                     .gap(px(10.))
                     .px(px(10.))
@@ -2631,8 +2750,7 @@ impl MainView {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
+                            .ellipsize_ui()
                             .text_sm()
                             .text_color(pal.text)
                             .child(name),
@@ -2657,6 +2775,7 @@ impl MainView {
                     .id(ElementId::Name(format!("clip-target-{name}").into()))
                     .flex()
                     .flex_row()
+                    .mirror()
                     .items_center()
                     .gap(px(6.))
                     .px(px(9.))
@@ -2686,9 +2805,10 @@ impl MainView {
         let list_bar = div()
             .flex()
             .flex_row()
+            .mirror()
             .items_center()
             .gap(px(8.))
-            .child(div().text_xs().text_color(pal.muted).child("Add to"))
+            .child(div().text_xs().text_color(pal.muted).child(t(Key::ClipAddTo)))
             .children(list_chips);
 
         let weak_queue = weak.clone();
@@ -2697,6 +2817,7 @@ impl MainView {
             .id("clip-queue-toggle")
             .flex()
             .flex_row()
+            .mirror()
             .items_center()
             .gap(px(9.))
             .cursor_pointer()
@@ -2728,20 +2849,20 @@ impl MainView {
                             .size(px(10.))
                             .rounded_full()
                             .bg(if queued { pal.bg } else { pal.muted })
-                            .ml(px(if queued { 16. } else { 2. })),
+                            .ml(px(crate::rtl::switch_thumb_ml(queued))),
                     ),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(pal.text)
-                    .child("Don't start immediately"),
+                    .child(t(Key::ToolbarQueue)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(pal.muted)
-                    .child("Add the links paused and start them later."),
+                    .child(t(Key::ClipQueueHint)),
             );
 
         let weak_cancel = weak.clone();
@@ -2749,23 +2870,31 @@ impl MainView {
         let footer = div()
             .flex()
             .flex_row()
+            .mirror()
             .items_center()
             .justify_between()
             .child(
                 div()
                     .text_xs()
                     .text_color(pal.muted)
-                    .child(format!("{selected} selected · {}", crate::format::fmt_bytes(known))),
+                    .child(tf(
+                        Key::ClipFooterSelected,
+                        &[
+                            &ltr_isolate(&selected.to_string()),
+                            &ltr_isolate(&crate::format::fmt_bytes(known)),
+                        ],
+                    )),
             )
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .mirror()
                     .gap(px(8.))
                     .child(
                         Button::new("clip-cancel")
                             .outline()
-                            .label("Cancel")
+                            .label(t(Key::CommonCancel))
                             .on_click(move |_, _, cx: &mut App| {
                                 weak_cancel.update(cx, |this, cx| this.close_clip(cx)).ok();
                             }),
@@ -2774,9 +2903,9 @@ impl MainView {
                         Button::new("clip-add")
                             .primary()
                             .label(if selected > 0 {
-                                format!("Add {selected}")
+                                tf(Key::ClipAddN, &[&ltr_isolate(&selected.to_string())])
                             } else {
-                                "Add".to_string()
+                                t(Key::ClipAdd).to_string()
                             })
                             .disabled(selected == 0)
                             .on_click(move |_, window, cx: &mut App| {
@@ -2817,21 +2946,23 @@ impl MainView {
                     .text_xl()
                     .font_semibold()
                     .text_color(pal.text)
-                    .child(format!(
-                        "Delete {count} download{}?",
-                        if count == 1 { "" } else { "s" }
-                    )),
+                    .child(if count == 1 {
+                        tf(Key::DeleteTitleOne, &[&ltr_isolate(&count.to_string())])
+                    } else {
+                        tf(Key::DeleteTitleMany, &[&ltr_isolate(&count.to_string())])
+                    }),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(pal.muted)
-                    .child("Queued transfers stop and disappear from the list."),
+                    .child(t(Key::DeleteBody)),
             )
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .mirror()
                     .items_center()
                     .gap(px(10.))
                     .child(
@@ -2852,19 +2983,20 @@ impl MainView {
                         div()
                             .text_sm()
                             .text_color(pal.text)
-                            .child("Also delete the downloaded files from disk"),
+                            .child(t(Key::DeleteFiles)),
                     ),
             )
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .mirror()
                     .justify_end()
                     .gap(px(8.))
                     .child(
                         Button::new("delete-cancel")
                             .outline()
-                            .label("Cancel")
+                            .label(t(Key::CommonCancel))
                             .on_click({
                                 let weak = weak.clone();
                                 move |_, _, cx: &mut App| {
@@ -2879,7 +3011,7 @@ impl MainView {
                     .child(
                         Button::new("delete-ok")
                             .primary()
-                            .label("Delete")
+                            .label(t(Key::CommonDelete))
                             .on_click(move |_, _, cx: &mut App| {
                                 weak_ok
                                     .update(cx, |this, cx| {
@@ -2916,26 +3048,27 @@ impl MainView {
                     .text_xl()
                     .font_semibold()
                     .text_color(pal.warn)
-                    .child(format!("Shutting down in {left}s")),
+                    .child(tf(Key::ShutdownCountdown, &[&ltr_isolate(&left.to_string())])),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(pal.muted)
                     .child(
-                        "A download list reached the end of its schedule and is set to power off the PC.",
+                        t(Key::ShutdownBody),
                     ),
             )
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .mirror()
                     .justify_end()
                     .gap(px(8.))
                     .child(
                         Button::new("shutdown-cancel")
                             .outline()
-                            .label("Cancel shutdown")
+                            .label(t(Key::ShutdownCancel))
                             .on_click(move |_, _, cx: &mut App| {
                                 weak_cancel
                                     .update(cx, |this, cx| {
@@ -2949,7 +3082,7 @@ impl MainView {
                     .child(
                         Button::new("shutdown-now")
                             .primary()
-                            .label("Shut down now")
+                            .label(t(Key::ShutdownNow))
                             .on_click(move |_, _, cx: &mut App| {
                                 weak_now
                                     .update(cx, |this, cx| {
@@ -3007,6 +3140,7 @@ impl Render for MainView {
             .size_full()
             .flex()
             .flex_row()
+            .mirror()
             .bg(pal.bg)
             .text_color(pal.text)
             .child(crate::sidebar::sidebar(self, window, cx))
@@ -3026,7 +3160,7 @@ impl Render for MainView {
 
 /// One label/value line in the File Properties window.
 fn property_row(
-    label: &'static str,
+    label: String,
     value: String,
     color: Hsla,
     copyable: bool,
@@ -3037,6 +3171,7 @@ fn property_row(
     let mut row = div()
         .flex()
         .flex_row()
+        .mirror()
         .items_start()
         .gap(px(10.))
         .py(px(7.))
@@ -3050,7 +3185,7 @@ fn property_row(
                 .pt(px(1.))
                 .text_xs()
                 .text_color(pal.muted)
-                .child(label),
+                .child(label.clone()),
         )
         .child(
             div()
@@ -3058,12 +3193,13 @@ fn property_row(
                 .min_w_0()
                 .text_sm()
                 .text_color(color)
+                .align_end()
                 .child(value.clone()),
         );
     if copyable {
-        let key = label;
+        let key = label.clone();
         let text = value;
-        let is_copied = copied == Some(label);
+        let is_copied = copied == Some(label.as_str());
         row = row.child(
             Button::new(ElementId::Name(format!("copy-{label}").into()))
                 .ghost()
@@ -3074,7 +3210,7 @@ fn property_row(
                     IconName::Copy
                 })
                 .text_color(if is_copied { pal.ok } else { pal.muted })
-                .tooltip(if is_copied { "Copied" } else { "Copy this value" })
+                .tooltip(if is_copied { t(Key::PropsCopied) } else { t(Key::PropsCopyValue) })
                 .on_click(move |_, _, cx: &mut App| {
                     let _ = crate::clipboard::write_text(&text);
                     weak.update(cx, |this, cx| {
@@ -3101,15 +3237,16 @@ fn address_row(
 ) -> AnyElement {
     let hint = error.clone().unwrap_or_else(|| {
         if editable {
-            "Progress is kept — use a mirror or refreshed link of the same file.".to_string()
+            t(Key::PropsUrlHintPaused).to_string()
         } else {
-            "Pause the download to change its address.".to_string()
+            t(Key::PropsUrlHintRunning).to_string()
         }
     });
     let hint_color = if error.is_some() { pal.bad } else { pal.muted };
     let mut row = div()
         .flex()
         .flex_row()
+        .mirror()
         .items_start()
         .gap(px(10.))
         .py(px(6.))
@@ -3123,7 +3260,7 @@ fn address_row(
                 .pt(px(7.))
                 .text_xs()
                 .text_color(pal.muted)
-                .child("Address"),
+                .child(t(Key::PropsAddress)),
         )
         .child(
             div()
@@ -3148,13 +3285,13 @@ fn address_row(
                 IconName::Copy
             })
             .text_color(if copied { pal.ok } else { pal.muted })
-            .tooltip(if copied { "Copied" } else { "Copy this address" })
+            .tooltip(if copied { t(Key::PropsCopied) } else { t(Key::PropsCopyAddress) })
             .on_click(move |_, _, cx: &mut App| {
                 let text = input_copy.read(cx).value().to_string();
                 let _ = crate::clipboard::write_text(&text);
                 weak_copy
                     .update(cx, |this, cx| {
-                        this.props_copied = Some("Address".to_string());
+                        this.props_copied = Some(t(Key::PropsAddress).to_string());
                         cx.notify();
                     })
                     .ok();
@@ -3168,8 +3305,8 @@ fn address_row(
             Button::new("props-url-apply")
                 .outline()
                 .compact()
-                .label("Apply")
-                .tooltip("Use this address for the paused download")
+                .label(t(Key::CommonApply))
+                .tooltip(t(Key::PropsApplyUrlTip))
                 .on_click(move |_, window, cx: &mut App| {
                     let raw = input_apply.read(cx).value().trim().to_string();
                     weak_apply
@@ -3195,27 +3332,26 @@ fn file_type_label(name: &str) -> String {
         .take_while(|c| c.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase();
-    let label = match ext.as_str() {
-        "" => "File",
-        "zip" | "rar" | "7z" | "tar" | "gz" | "xz" | "bz2" => "Compressed Archive",
-        "pdf" => "PDF Document",
-        "doc" | "docx" | "rtf" | "odt" => "Word Document",
-        "xls" | "xlsx" | "csv" | "ods" => "Spreadsheet",
-        "ppt" | "pptx" | "odp" => "Presentation",
-        "exe" | "msi" | "msix" => "Application",
-        "mp4" | "mkv" | "avi" | "mov" | "webm" | "wmv" => "Video File",
-        "mp3" | "wav" | "flac" | "m4a" | "ogg" | "aac" => "Audio File",
-        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "ico" | "svg" => "Image",
-        "txt" | "md" | "log" => "Text Document",
-        "iso" | "img" => "Disc Image",
-        _ => return format!("{} File", ext.to_ascii_uppercase()),
-    };
-    label.to_string()
+    match ext.as_str() {
+        "" => t(Key::FiletypeGeneric).to_string(),
+        "zip" | "rar" | "7z" | "tar" | "gz" | "xz" | "bz2" => t(Key::FiletypeArchive).to_string(),
+        "pdf" => t(Key::FiletypePdf).to_string(),
+        "doc" | "docx" | "rtf" | "odt" => t(Key::FiletypeWord).to_string(),
+        "xls" | "xlsx" | "csv" | "ods" => t(Key::FiletypeSpreadsheet).to_string(),
+        "ppt" | "pptx" | "odp" => t(Key::FiletypePresentation).to_string(),
+        "exe" | "msi" | "msix" => t(Key::FiletypeApplication).to_string(),
+        "mp4" | "mkv" | "avi" | "mov" | "webm" | "wmv" => t(Key::FiletypeVideo).to_string(),
+        "mp3" | "wav" | "flac" | "m4a" | "ogg" | "aac" => t(Key::FiletypeAudio).to_string(),
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "ico" | "svg" => t(Key::FiletypeImage).to_string(),
+        "txt" | "md" | "log" => t(Key::FiletypeText).to_string(),
+        "iso" | "img" => t(Key::FiletypeDisc).to_string(),
+        _ => tf(Key::FiletypeOther, &[&ext.to_ascii_uppercase()]),
+    }
 }
 
 fn logo_menu_item(
     icon: gpui_kit::assets::IconName,
-    label: &'static str,
+    label: String,
     tone: Hsla,
     pal: Palette,
     weak: WeakEntity<MainView>,
@@ -3225,6 +3361,7 @@ fn logo_menu_item(
         .id(ElementId::Name(format!("logo-menu-{label}").into()))
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .gap(px(10.))
         .px(px(12.))
@@ -3255,6 +3392,7 @@ fn update_dialog_body(
     div()
         .flex()
         .flex_row()
+        .mirror()
         .items_start()
         .gap(px(12.))
         .w_full()
@@ -3292,8 +3430,8 @@ fn guide_row(
     id: &'static str,
     icon: gpui_kit::assets::IconName,
     tone: Hsla,
-    title: &'static str,
-    subtitle: &'static str,
+    title: String,
+    subtitle: String,
     pal: Palette,
     weak: WeakEntity<MainView>,
     path: std::path::PathBuf,
@@ -3302,6 +3440,7 @@ fn guide_row(
         .id(ElementId::Name(format!("guide-{id}").into()))
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .gap(px(12.))
         .p(px(10.))
@@ -3318,10 +3457,10 @@ fn guide_row(
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "Guide file".into());
+                    .unwrap_or_else(|| t(Key::GuideMissingFallback).to_string());
                 weak.update(cx, |this, cx| {
                     this.show_notice(
-                        format!("{name} was not found next to the application"),
+                        tf(Key::GuideMissing, &[&name]),
                         true,
                         cx,
                     );
@@ -3418,14 +3557,14 @@ fn fetch_latest_release() -> Result<GhRelease, String> {
         .set("User-Agent", concat!("DVIDM/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(12));
     let response = request.call().map_err(|err| match err {
-        ureq::Error::Status(code, _) => format!("GitHub returned HTTP {code}"),
-        ureq::Error::Transport(t) => format!("Network error: {t}"),
+        ureq::Error::Status(code, _) => tf(Key::UpdateGithubHttp, &[&ltr_isolate(&code.to_string())]),
+        ureq::Error::Transport(t) => tf(Key::UpdateNetworkError, &[&t.to_string()]),
     })?;
     let text = response
         .into_string()
-        .map_err(|e| format!("Could not read the GitHub response: {e}"))?;
+        .map_err(|e| tf(Key::UpdateReadFailed, &[&e.to_string()]))?;
     serde_json::from_str::<GhRelease>(&text)
-        .map_err(|_| "Unexpected response from GitHub".to_string())
+        .map_err(|_| t(Key::UpdateBadJson).to_string())
 }
 
 fn version_key(value: &str) -> Vec<u64> {
@@ -3522,7 +3661,7 @@ fn drive_label(dir: &std::path::Path) -> String {
             .to_string_lossy()
             .trim_end_matches('\\')
             .to_uppercase(),
-        _ => "Disk".to_string(),
+        _ => t(Key::StatusBarDisk).to_string(),
     }
 }
 

@@ -6,7 +6,7 @@
 
 **Fast, segmented downloads for Windows — with download lists, schedules, speed control and Chrome integration.**
 
-<img src="https://img.shields.io/badge/version-0.5.35-58a6ff?style=for-the-badge" alt="Version 0.5.35" />
+<img src="https://img.shields.io/badge/version-0.5.65-58a6ff?style=for-the-badge" alt="Version 0.5.65" />
 <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=for-the-badge" alt="Windows 10 and 11" />
 <img src="https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-4285F4?style=for-the-badge" alt="Chrome and Edge" />
 <img src="https://img.shields.io/badge/license-Freeware-12ec91?style=for-the-badge" alt="Freeware" />
@@ -14,7 +14,7 @@
 <br />
 
 [**Download DVIDM**](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) &nbsp;·&nbsp;
-[Portable zip](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.35/DVIDM-Portable-0.5.35.zip) &nbsp;·&nbsp;
+[Portable zip](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.65/DVIDM-Portable-0.5.65.zip) &nbsp;·&nbsp;
 [English guide](docs/USER-GUIDE.pdf) &nbsp;·&nbsp;
 [راهنمای فارسی](docs/USER-GUIDE.fa.pdf) &nbsp;·&nbsp;
 [Extension video](docs/install%20extension%20guide.mp4)
@@ -29,7 +29,7 @@
 
 DVIDM is a desktop download manager for Windows built around **segmented, multi-connection transfers**. It splits a file across up to 32 connections, resumes paused downloads, retries broken parts, and keeps everything organized in lists, categories and schedules — all in a compact dark interface.
 
-The package includes a **Chrome / Edge extension** that sends selected links straight to the app, plus **English and Persian user guides** and a short **extension install video**.
+The package includes a **Chrome / Edge extension** that sends links and pages straight to the app, a **Persian right-to-left interface**, plus **English and Persian user guides** and a short **extension install video**.
 
 ---
 
@@ -41,7 +41,9 @@ The package includes a **Chrome / Edge extension** that sends selected links str
 | **Download lists** | Colored lists, per-list parallelism, scheduled sessions with a start countdown and session length, and optional shutdown when a list window closes. |
 | **Queue control** | Start, pause and re-order downloads; hold new downloads with *Don't start immediately*. |
 | **Speed limit** | Global bandwidth cap from 0 to 1 GB/s. |
-| **Browser integration** | Send links, media and pages from Chrome or Edge; Ctrl+click or Alt+click a file link to download it directly. Right-click menus and a clipboard picker are included. |
+| **Browser integration** | Send links and pages from Chrome or Edge. Choose the shortcut key in Settings — Ctrl, Alt, Shift, Insert or a combination — then hold it and click a file link. Extensionless and authenticated links are resolved through Chrome first so DVIDM receives the final URL and server filename. |
+| **Persian & RTL** | Interface language selector (System, English, فارسی, العربية). Persian and Arabic mirror the whole interface right-to-left, with Persian wording, bidi-safe numbers and grapheme-safe text editing. |
+| **Proxy** | No proxy, Windows system proxy, or manual HTTP / SOCKS5 with optional credentials. The Windows proxy is re-read while the app runs. |
 | **Smart organization** | Categories, search, sortable columns and a **Last date** column showing the last start time with full date/time on hover. |
 | **Update check** | Checks GitHub from the logo menu and every two days in the background. **Download installer** adds the MSI to DVIDM's own downloads. |
 | **Ready-to-use defaults** | Saves to your Windows **Downloads** folder, partial files in `%TEMP%\DVIDM`, and starts with Windows on first launch. |
@@ -56,7 +58,7 @@ The package includes a **Chrome / Edge extension** that sends selected links str
 | File | Description |
 |---|---|
 | [`installer/DVIDM-Setup.msi`](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) | Windows installer (64-bit, no administrator rights required) — also attached to [Releases](https://github.com/davoodtaba-glitch/DVIDM/releases) |
-| [`portable/DVIDM-Portable-0.5.35.zip`](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.35/DVIDM-Portable-0.5.35.zip) | Portable build: extract and run, no installer |
+| [`portable/DVIDM-Portable-0.5.65.zip`](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.65/DVIDM-Portable-0.5.65.zip) | Portable build: extract and run, no installer |
 | [`extension/chrome-extension/`](extension/chrome-extension) | Unpacked Chrome / Edge extension |
 | [`extension/DVIDM-chrome-extension.zip`](extension/DVIDM-chrome-extension.zip) | Same extension as a zip archive |
 | [`docs/`](docs) | English and Persian guides, and the extension video |
@@ -88,7 +90,7 @@ The extension talks to the running app over a local connection (`127.0.0.1:52137
    %LOCALAPPDATA%\Programs\DVIDM\chrome-extension
    ```
 5. Pin the extension to the toolbar. Select links on a page and choose **Send selected links**, or use the right-click menu. Copied links can also be sent from DVIDM's **Clipboard** button.
-6. **Ctrl+click or Alt+click a file link** to send it straight to DVIDM and start it. Normal page links still open in a new tab; Ctrl+Shift+click keeps Chrome's behavior.
+6. Choose the shortcut key in **Settings → Browser shortcut**, then hold it and click a file link to send it straight to DVIDM. Normal page links are untouched. The file-type list is configurable in the same card (`.safetensors` and types up to 32 characters are supported).
 
 Portable build: choose the `chrome-extension` folder next to `DVIDM.exe` when loading the extension. After copying updated extension files, press **Reload** on the extension card.
 
@@ -138,7 +140,7 @@ Use **Settings → Apps → Installed apps → DV Internet Download Manager → 
 
 ## Version
 
-Current release: **0.5.35** — see [CHANGELOG.md](CHANGELOG.md) for user-facing changes.
+Current release: **0.5.65** — see [CHANGELOG.md](CHANGELOG.md) for user-facing changes.
 
 ---
 

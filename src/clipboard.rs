@@ -137,13 +137,13 @@ pub(crate) struct ClipImport {
     #[allow(dead_code)]
     pub(crate) dest_opened_at: u64,
     /// Header suffix: "clipboard" or "Chrome".
-    pub(crate) source: &'static str,
+    pub(crate) source: String,
     tx: Sender<(usize, Result<Option<u64>, String>)>,
     rx: Receiver<(usize, Result<Option<u64>, String>)>,
 }
 
 impl ClipImport {
-    pub(crate) fn new(urls: Vec<String>, source: &'static str) -> Self {
+    pub(crate) fn new(urls: Vec<String>, source: impl Into<String>) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut clip = Self {
             items: Vec::new(),
@@ -151,7 +151,7 @@ impl ClipImport {
             dest_open: false,
             dest_anchor: (0.0, 0.0),
             dest_opened_at: 0,
-            source,
+            source: source.into(),
             tx,
             rx,
         };

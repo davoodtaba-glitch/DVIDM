@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.65
+
+- **Persian / RTL interface:** language selector under **Settings → Appearance** (System, English, فارسی, العربية). Persian and Arabic mirror the sidebar, toolbar, table, dialogs and notices right-to-left; System follows the Windows UI language. Adds a Persian string catalogue, bidi-isolated numbers, grapheme-safe delete/rename and RTL-aware truncation.
+- **Proxy support:** No proxy, Windows system proxy, and manual **HTTP or SOCKS5** with optional credentials. Authenticated HTTPS proxying works through CONNECT; the Windows proxy is re-read while the app runs. Manual address entry accepts `host:port` and full `socks5://` URLs.
+- **Chrome / Edge extension 0.5.11:** Configurable shortcut key presets (Ctrl, Alt, Shift, Insert, Ctrl+Alt, Ctrl+Shift, Alt+Shift, Ctrl or Alt). The file-type list accepts up to 32 characters (including `.safetensors`). Extensionless and authenticated downloads are resolved through Chrome so DVIDM receives the final CDN URL and server filename; a fallback sends the original link if Chrome never starts, and Chrome keeps the file if DVIDM is offline.
+- **Download engine:** More stable throughput with larger reads, a shared pooled connection agent, bounded range requests and no per-part fsync. Speed now shows two decimals and is smoothed over a longer window. Temp part files are isolated by destination and stale parts are cleared, preventing different downloads with the same filename from resuming each other's bytes.
+- **Interface polish:** Three-letter file badges (SAF for `.safetensors`), extra spacing between Progress and Speed, and modal windows now block clicks to the download list behind them.
+- Downloads are stored under the download list and category folders.
+- Rebuilt installer and portable package, including the `locale` files and extension 0.5.11.
+
 ## 0.5.35
 
 - **Chrome extension 0.2.8:** Ctrl+click or Alt+click a file link to add it to DVIDM and start it directly. Ordinary page links are untouched, Ctrl+Shift+click stays with Chrome, and “Don’t start immediately” is respected.

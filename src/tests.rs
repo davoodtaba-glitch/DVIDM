@@ -392,3 +392,60 @@ use std::path::PathBuf;
         assert!(move_selection(&mut order, &only_c, true));
         assert_eq!(order, ids(&["c", "a", "b"]));
     }
+
+    #[test]
+    fn collect_direct_formats_keeps_custom_types() {
+        use crate::core::prefs::{
+            collect_direct_formats, default_direct_formats, parse_direct_formats,
+        };
+        assert_eq!(
+            collect_direct_formats("mp4\nmkv\nzip"),
+            vec!["mp4", "mkv", "zip"]
+        );
+        assert_eq!(
+            collect_direct_formats("mp4, mkv, zip"),
+            vec!["mp4", "mkv", "zip"]
+        );
+        assert_eq!(collect_direct_formats(".MP4; .mkv"), vec!["mp4", "mkv"]);
+        assert_eq!(
+            collect_direct_formats("mp4\r\nmkv\r\nzip"),
+            vec!["mp4", "mkv", "zip"]
+        );
+        assert!(collect_direct_formats("").is_empty());
+        assert!(collect_direct_formats("   \n,;").is_empty());
+        assert_eq!(
+            collect_direct_formats("mp4, ***, tar.gz, mkv"),
+            vec!["mp4", "mkv"]
+        );
+        assert_eq!(
+            collect_direct_formats("safetensors, mp4"),
+            vec!["safetensors", "mp4"]
+        );
+        assert_eq!(parse_direct_formats(""), default_direct_formats());
+        assert_eq!(parse_direct_formats("mp4"), vec!["mp4".to_string()]);
+    }
+
+    #[test]
+    fn guess_name_prefers_signed_url_disposition() {
+        let url = "https://b2.civitai.com/file/civitai-modelfiles/model/551030/fluxIllustriousxl.W9sA.safetensors?Authorization=3_20261026192054_abc&b2ContentDisposition=attachment%3B+filename%3D%22flux_illustriousXL_schnell_v1-rev2.safetensors%22";
+        assert_eq!(
+            crate::engine::guess_name(url),
+            "flux_illustriousXL_schnell_v1-rev2.safetensors"
+        );
+        assert_eq!(
+            crate::engine::guess_name("https://example.com/path/file.zip?token=1"),
+            "file.zip"
+        );
+    }
+
+    #[test]
+    fn ui_lang_rtl_covers_fa_ar_he() {
+        use crate::core::prefs::ui_lang_is_rtl;
+        assert!(ui_lang_is_rtl("fa", "en"));
+        assert!(ui_lang_is_rtl("ar", "en"));
+        assert!(ui_lang_is_rtl("he", "en"));
+        assert!(!ui_lang_is_rtl("en", "fa"));
+        assert!(ui_lang_is_rtl("system", "fa"));
+        assert!(ui_lang_is_rtl("system", "he"));
+        assert!(!ui_lang_is_rtl("system", "en"));
+    }

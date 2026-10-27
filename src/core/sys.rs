@@ -287,6 +287,97 @@ pub(crate) fn set_autostart(enabled: bool) -> Result<(), String> {
     }
 }
 
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetUserDefaultUILanguage() -> u16;
+}
+
+/// Windows UI language reduced to what the interface direction cares about.
+pub(crate) fn system_ui_language() -> String {
+    unsafe {
+        match GetUserDefaultUILanguage() & 0x3ff {
+            0x29 => "fa".to_string(),
+            0x01 => "ar".to_string(),
+            0x0d => "he".to_string(),
+            _ => "en".to_string(),
+        }
+    }
+}
+
+/// Windows Internet Settings proxy, as `http://host:port` when enabled.
+pub(crate) fn system_proxy() -> Option<String> {
+    const KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    const REG_DWORD: u32 = 4;
+    let key = wide(KEY);
+    unsafe {
+        let mut hkey: *mut c_void = std::ptr::null_mut();
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER as *mut c_void,
+            key.as_ptr(),
+            0,
+            KEY_QUERY_VALUE,
+            &mut hkey,
+        ) != 0
+        {
+            return None;
+        }
+        let mut enable: u32 = 0;
+        let mut len = 4u32;
+        let mut ty = 0u32;
+        let name = wide("ProxyEnable");
+        let rc = RegQueryValueExW(
+            hkey,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut ty,
+            &mut enable as *mut u32 as *mut u8,
+            &mut len,
+        );
+        if rc != 0 || ty != REG_DWORD || enable == 0 {
+            RegCloseKey(hkey);
+            return None;
+        }
+        let mut buf = [0u16; 512];
+        let mut bytes = (buf.len() * 2) as u32;
+        let mut ty = 0u32;
+        let name = wide("ProxyServer");
+        let rc = RegQueryValueExW(
+            hkey,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut ty,
+            buf.as_mut_ptr() as *mut u8,
+            &mut bytes,
+        );
+        RegCloseKey(hkey);
+        if rc != 0 {
+            return None;
+        }
+        let n = (bytes as usize / 2).min(buf.len());
+        // REG_SZ includes the terminating NUL in the returned length.
+        let text = String::from_utf16_lossy(&buf[..n]);
+        let text = text.trim_matches('\0').trim();
+        let server = if text.contains('=') {
+            text.split(';')
+                .filter_map(|part| part.split_once('='))
+                .find(|(scheme, _)| {
+                    scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+                })
+                .map(|(_, value)| value.trim().to_string())
+                .unwrap_or_default()
+        } else {
+            text.to_string()
+        };
+        if server.is_empty() {
+            None
+        } else if server.contains("://") {
+            Some(server)
+        } else {
+            Some(format!("http://{server}"))
+        }
+    }
+}
+
 /// Keep the Run entry pointing at this executable after a move or update.
 pub(crate) fn refresh_autostart() {
     if autostart_enabled() {

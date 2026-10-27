@@ -45,7 +45,27 @@ pub(crate) fn fmt_bytes(n: u64) -> String {
 }
 
 pub(crate) fn fmt_speed(n: u64) -> String {
-    if n == 0 { "—".into() } else { format!("{}/s", fmt_bytes(n)) }
+    if n == 0 {
+        "—".into()
+    } else {
+        format!("{}/s", fmt_rate(n))
+    }
+}
+
+/// Rates keep two decimals (1.94 MB/s) so small changes are visible.
+fn fmt_rate(n: u64) -> String {
+    const U: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < 4 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.2} {}", U[i])
+    }
 }
 
 /// Active download time, excluding pauses.

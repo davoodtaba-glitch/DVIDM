@@ -4,13 +4,17 @@
 use crate::app::MainView;
 use crate::core::Command;
 use crate::format::fmt_speed;
+use crate::i18n::{t, tf, Key};
+use crate::rtl::{AlignEnd as _, DirEdge as _, Mirror as _};
+use crate::text::ltr_isolate;
 use crate::theme::Palette;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
-use gpui_kit::component::input::Input;
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable as _, IconName, WindowExt as _};
 use gpui_kit::base::{Scrollbar, ScrollbarMode};
@@ -25,6 +29,7 @@ pub(crate) fn page(
 ) -> AnyElement {
     let pal = view.pal;
     let prefs = view.svc.prefs().clone();
+    let ui_lang = prefs.ui_lang.clone();
     let dir = view.svc.save_dir();
 
     let mut body = div()
@@ -33,6 +38,7 @@ pub(crate) fn page(
         .flex_col()
         .flex_1()
         .min_h_0()
+        .min_w_0()
         .overflow_y_scroll()
         .gap(px(12.))
         .px(px(24.))
@@ -42,33 +48,32 @@ pub(crate) fn page(
                 .text_xl()
                 .font_semibold()
                 .text_color(pal.text)
-                .child("Settings"),
+                .align_end()
+                .child(t(Key::SettingsTitle)),
         )
-        .child(div().text_sm().text_color(pal.muted).child(
-            "Appearance and defaults for new downloads. Changes are saved immediately.",
-        ));
+        .child(div().text_sm().text_color(pal.muted).align_end().child(t(Key::SettingsIntro)));
 
     // Appearance ---------------------------------------------------------
     body = body.child(
-        card("Appearance", pal)
+        card(t(Key::SettingsAppearance), pal)
             .child(
                 div()
                     .text_sm()
                     .text_color(pal.muted)
-                    .child("Light and dark themes share the same layout and colors."),
+                    .child(t(Key::SettingsThemeHint)),
             )
             .child(
                 div()
                     .mt(px(10.))
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .gap(px(8.))
                     .child(
                         Button::new("theme-light")
                             .when(!prefs.theme_dark, |b| b.primary())
                             .when(prefs.theme_dark, |b| b.outline())
                             .icon(IconName::Sun)
-                            .label("Light")
+                            .label(t(Key::SettingsThemeLight))
                             .on_click(cx.listener(|this, _, _, cx| this.set_theme(false, cx))),
                     )
                     .child(
@@ -76,8 +81,54 @@ pub(crate) fn page(
                             .when(prefs.theme_dark, |b| b.primary())
                             .when(!prefs.theme_dark, |b| b.outline())
                             .icon(IconName::Moon)
-                            .label("Dark")
+                            .label(t(Key::SettingsThemeDark))
                             .on_click(cx.listener(|this, _, _, cx| this.set_theme(true, cx))),
+                    ),
+            )
+            .child(
+                div()
+                    .mt(px(10.))
+                    .flex()
+                    .flex_row()
+                    .mirror()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(pal.text)
+                            .child(t(Key::SettingsLanguage)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .mirror()
+                            .gap(px(6.))
+                            .child(ui_lang_button(
+                                "lang-system",
+                                t(Key::SettingsLangSystem),
+                                "system",
+                                &ui_lang,
+                                pal,
+                                cx,
+                            ))
+                            .child(ui_lang_button(
+                                "lang-en",
+                                t(Key::SettingsLangEnglish),
+                                "en",
+                                &ui_lang,
+                                pal,
+                                cx,
+                            ))
+                            .child(ui_lang_button(
+                                "lang-fa",
+                                t(Key::SettingsLangPersian),
+                                "fa",
+                                &ui_lang,
+                                pal,
+                                cx,
+                            )),
                     ),
             ),
     );
@@ -85,11 +136,11 @@ pub(crate) fn page(
     // Startup ------------------------------------------------------------
     let autostart = crate::core::sys::autostart_enabled();
     body = body.child(
-        card("Startup", pal)
+        card(t(Key::SettingsStartup), pal)
             .child(
                 div()
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .items_center()
                     .gap(px(10.))
                     .child(
@@ -101,7 +152,7 @@ pub(crate) fn page(
                                         this.svc.apply(Command::AutostartConfigured);
                                     }
                                     Err(err) => {
-                                        this.show_notice(err, true, cx);
+                                        this.show_notice(crate::i18n::error(&err), true, cx);
                                     }
                                 }
                                 cx.notify();
@@ -111,7 +162,7 @@ pub(crate) fn page(
                         div()
                             .text_sm()
                             .text_color(pal.text)
-                            .child("Start DVIDM with Windows"),
+                            .child(t(Key::SettingsAutostart)),
                     ),
             )
             .child(
@@ -119,18 +170,18 @@ pub(crate) fn page(
                     .mt(px(6.))
                     .text_xs()
                     .text_color(pal.muted)
-                    .child("Adds DVIDM to your sign-in startup apps."),
+                    .child(t(Key::SettingsAutostartHint)),
             ),
     );
 
     // Notifications ------------------------------------------------------
     let notify = prefs.notify_complete;
     body = body.child(
-        card("Notifications", pal)
+        card(t(Key::SettingsNotifications), pal)
             .child(
                 div()
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .items_center()
                     .gap(px(10.))
                     .child(
@@ -145,7 +196,7 @@ pub(crate) fn page(
                         div()
                             .text_sm()
                             .text_color(pal.text)
-                            .child("Notify me when a download completes"),
+                            .child(t(Key::SettingsNotifyComplete)),
                     ),
             )
             .child(
@@ -153,18 +204,18 @@ pub(crate) fn page(
                     .mt(px(6.))
                     .text_xs()
                     .text_color(pal.muted)
-                    .child("A card appears at the bottom-right of the screen."),
+                    .child(t(Key::SettingsNotifyHint)),
             ),
     );
 
     // Behavior -----------------------------------------------------------
     let focus_new = prefs.focus_new_download;
     body = body.child(
-        card("Behavior", pal)
+        card(t(Key::SettingsBehavior), pal)
             .child(
                 div()
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .items_center()
                     .gap(px(10.))
                     .child(
@@ -179,7 +230,7 @@ pub(crate) fn page(
                         div()
                             .text_sm()
                             .text_color(pal.text)
-                            .child("Scroll to a download when it is added"),
+                            .child(t(Key::SettingsFocusNew)),
                     ),
             )
             .child(
@@ -187,13 +238,363 @@ pub(crate) fn page(
                     .mt(px(6.))
                     .text_xs()
                     .text_color(pal.muted)
-                    .child("Brings the new card into view, including links sent from the browser."),
+                    .child(t(Key::SettingsFocusHint)),
+            ),
+    );
+
+    // Browser shortcut ----------------------------------------------------
+    let modifier = prefs.browser_modifier.clone();
+    let shortcut_label = match modifier.as_str() {
+        "ctrl" => t(Key::ShortcutCtrlClick),
+        "alt" => t(Key::ShortcutAltClick),
+        "shift" => t(Key::ShortcutShiftClick),
+        "insert" => t(Key::ShortcutInsertClick),
+        "ctrl_alt" => t(Key::ShortcutCtrlAltClick),
+        "ctrl_shift" => t(Key::ShortcutCtrlShiftClick),
+        "alt_shift" => t(Key::ShortcutAltShiftClick),
+        _ => t(Key::ShortcutBothClick),
+    };
+    body = body.child(
+        card(t(Key::SettingsBrowserShortcut), pal)
+            .child(div().text_sm().text_color(pal.muted).child(tf(
+                Key::SettingsBrowserHint,
+                &[shortcut_label.as_str()],
+            )))
+            .child(
+                div()
+                    .mt(px(8.))
+                    .flex()
+                    .flex_row().mirror()
+                    .flex_wrap()
+                    .gap(px(6.))
+                    .child(browser_modifier_button(
+                        "ctrl-click",
+                        t(Key::ModCtrl),
+                        "ctrl",
+                        &modifier,
+                        pal,
+                        cx,
+                    ))
+                    .child(browser_modifier_button(
+                        "alt-click",
+                        t(Key::ModAlt),
+                        "alt",
+                        &modifier,
+                        pal,
+                        cx,
+                    ))
+                    .child(browser_modifier_button(
+                        "shift-click",
+                        t(Key::ModShift),
+                        "shift",
+                        &modifier,
+                        pal,
+                        cx,
+                    ))
+                    .child(browser_modifier_button(
+                        "insert-click",
+                        t(Key::ModInsert),
+                        "insert",
+                        &modifier,
+                        pal,
+                        cx,
+                    ))
+                    .child(browser_modifier_button(
+                        "ctrl-alt-click",
+                        t(Key::ModCtrlAlt),
+                        "ctrl_alt",
+                        &modifier,
+                        pal,
+                        cx,
+                    ))
+                    .child(browser_modifier_button(
+                        "ctrl-shift-click",
+                        t(Key::ModCtrlShift),
+                        "ctrl_shift",
+                        &modifier,
+                        pal,
+                        cx,
+                    ))
+                    .child(browser_modifier_button(
+                        "alt-shift-click",
+                        t(Key::ModAltShift),
+                        "alt_shift",
+                        &modifier,
+                        pal,
+                        cx,
+                    ))
+                    .child(browser_modifier_button(
+                        "both-click",
+                        t(Key::ModBoth),
+                        "both",
+                        &modifier,
+                        pal,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .mt(px(10.))
+                    .flex()
+                    .flex_row().mirror()
+                    .items_start()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(
+                                Textarea::new(&view.formats_input)
+                                    .w_full()
+                                    .h(px(96.)),
+                            ),
+                    )
+                    .child(
+                        Button::new("formats-apply")
+                            .outline()
+                            .label(t(Key::CommonApply))
+                            .tooltip(t(Key::SettingsFormatsApplyTip))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.apply_direct_formats(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("formats-reset")
+                            .outline()
+                            .label(t(Key::CommonReset))
+                            .tooltip(t(Key::SettingsFormatsResetTip))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.svc.apply(Command::SetDirectFormats(String::new()));
+                                this.sync_formats_input(window, cx);
+                                cx.notify();
+                            })),
+                    ),
+            )
+                    .child(
+                        div()
+                            .mt(px(6.))
+                            .w_full()
+                            .text_xs()
+                            .text_color(pal.muted)
+                            .child(tf(
+                                Key::SettingsFormatsDefaults,
+                                &[&crate::core::prefs::DEFAULT_DIRECT_FORMATS
+                                    .chunks(8)
+                                    .map(|c| c.join(", "))
+                                    .collect::<Vec<_>>()
+                                    .join(",\n")],
+                            )),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.))
+                            .w_full()
+                            .text_xs()
+                            .text_color(pal.muted)
+                            .child(tf(
+                                Key::SettingsPrefsPath,
+                                &[&crate::core::prefs::prefs_path().display().to_string()],
+                            )),
+                    ),
+    );
+
+    // Proxy / SOCKS ------------------------------------------------------
+    let proxy_mode = prefs.proxy_mode.clone();
+    let proxy_kind = prefs.proxy_kind.clone();
+    let manual_proxy = proxy_mode == "manual";
+    let system_note = if proxy_mode == "system" {
+        Some(match crate::core::sys::system_proxy() {
+            Some(url) => (tf(Key::SettingsWindowsProxy, &[&ltr_isolate(&url)]), pal.muted),
+            None => (
+                t(Key::SettingsNoWindowsProxy).to_string(),
+                pal.warn,
+            ),
+        })
+    } else {
+        None
+    };
+    let (ph, ps, pf) = (prefs.proxy_http, prefs.proxy_https, prefs.proxy_ftp);
+    body = body.child(
+        card(t(Key::SettingsProxy), pal)
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(pal.muted)
+                    .child(t(Key::SettingsProxyHint)),
+            )
+            .child(
+                div()
+                    .mt(px(8.))
+                    .flex()
+                    .flex_row().mirror()
+                    .gap(px(6.))
+                    .child(proxy_mode_button("proxy-none", t(Key::SettingsProxyNone), "none", &proxy_mode, cx))
+                    .child(proxy_mode_button("proxy-system", t(Key::SettingsProxySystem), "system", &proxy_mode, cx))
+                    .child(proxy_mode_button("proxy-manual", t(Key::SettingsProxyManual), "manual", &proxy_mode, cx)),
+            )
+            .when(system_note.is_some(), |card| {
+                let (text, color) = system_note.clone().unwrap();
+                card.child(
+                    div()
+                        .mt(px(6.))
+                        .text_xs()
+                        .text_color(color)
+                        .child(text),
+                )
+            })
+            .child(
+                div()
+                    .mt(px(8.))
+                    .flex()
+                    .flex_row().mirror()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(pal.muted)
+                            .child(t(Key::SettingsProxyType)),
+                    )
+                    .child(proxy_kind_button("proxy-kind-http", t(Key::SettingsProxyHttp), "http", &proxy_kind, cx))
+                    .child(proxy_kind_button(
+                        "proxy-kind-socks",
+                        t(Key::SettingsProxySocks5),
+                        "socks5",
+                        &proxy_kind,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .mt(px(10.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(pal.muted)
+                            .child(t(Key::SettingsProxyAddressHint)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row().mirror()
+                            .gap(px(6.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(Input::new(&view.proxy_host_input).disabled(!manual_proxy)),
+                            )
+                            .child(
+                                div()
+                                    .w(px(90.))
+                                    .child(Input::new(&view.proxy_port_input).disabled(!manual_proxy)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row().mirror()
+                            .gap(px(6.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(Input::new(&view.proxy_user_input).disabled(!manual_proxy)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(Input::new(&view.proxy_pass_input).disabled(!manual_proxy)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row().mirror()
+                            .items_center()
+                            .gap(px(14.))
+                            .child(
+                                Checkbox::new("proxy-http")
+                                    .checked(ph)
+                                    .label(t(Key::SettingsProxyProtoHttp))
+                                    .on_click(cx.listener(move |this, on, _, cx| {
+                                        this.svc.apply(Command::SetProxyProtocols {
+                                            http: *on,
+                                            https: ps,
+                                            ftp: pf,
+                                        });
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("proxy-https")
+                                    .checked(ps)
+                                    .label(t(Key::SettingsProxyProtoHttps))
+                                    .on_click(cx.listener(move |this, on, _, cx| {
+                                        this.svc.apply(Command::SetProxyProtocols {
+                                            http: ph,
+                                            https: *on,
+                                            ftp: pf,
+                                        });
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("proxy-ftp")
+                                    .checked(pf)
+                                    .label(t(Key::SettingsProxyProtoFtp))
+                                    .on_click(cx.listener(move |this, on, _, cx| {
+                                        this.svc.apply(Command::SetProxyProtocols {
+                                            http: ph,
+                                            https: ps,
+                                            ftp: *on,
+                                        });
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("proxy-apply")
+                                    .outline()
+                                    .label(t(Key::CommonApply))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let host = this.proxy_host_input.read(cx).value().to_string();
+                                        let port = this
+                                            .proxy_port_input
+                                            .read(cx)
+                                            .value()
+                                            .trim()
+                                            .to_string();
+                                        let port = crate::text::from_fa_digits(&port)
+                                            .parse::<u16>()
+                                            .unwrap_or(8080)
+                                            .max(1);
+                                        let user = this.proxy_user_input.read(cx).value().to_string();
+                                        let pass = this.proxy_pass_input.read(cx).value().to_string();
+                                        this.svc.apply(Command::SetProxyFields {
+                                            host,
+                                            port,
+                                            user,
+                                            pass,
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        Checkbox::new("proxy-browser")
+                            .checked(prefs.proxy_from_browser)
+                            .label(t(Key::SettingsProxyFromBrowser))
+                            .on_click(cx.listener(|this, on, _, cx| {
+                                this.svc.apply(Command::SetProxyFromBrowser(*on));
+                                cx.notify();
+                            })),
+                    ),
             ),
     );
 
     // Destination --------------------------------------------------------
     body = body.child(
-        card("Save to", pal)
+        card(t(Key::SettingsSaveTo), pal)
             .child(
                 div()
                     .px(px(10.))
@@ -210,12 +611,12 @@ pub(crate) fn page(
                 div()
                     .mt(px(10.))
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .gap(px(8.))
                     .child(
                         Button::new("browse")
                             .outline()
-                            .label("Browse…")
+                            .label(t(Key::CommonBrowse))
                             .on_click(cx.listener(|_, _, _, cx| {
                                 // The native picker pumps its own modal message
                                 // loop; running it inside a GPUI handler re-enters
@@ -235,7 +636,7 @@ pub(crate) fn page(
                                 .detach();
                             })),
                     )
-                    .child(Button::new("open-dir").outline().label("Open").on_click({
+                    .child(Button::new("open-dir").outline().label(t(Key::CommonOpen)).on_click({
                         let dir = dir.clone();
                         move |_, _, cx: &mut App| {
                             crate::app::open_in_background(dir.clone(), cx);
@@ -247,9 +648,9 @@ pub(crate) fn page(
     // Temporary files ----------------------------------------------------
     let temp = view.svc.temp_dir();
     body = body.child(
-        card("Temporary files", pal)
+        card(t(Key::SettingsTempFiles), pal)
             .child(div().text_sm().text_color(pal.muted).child(
-                "Partial downloads stay here until they finish. Changing the folder moves the parts of paused downloads; pause active ones first.",
+                t(Key::SettingsTempHint),
             ))
             .child(
                 div()
@@ -268,12 +669,12 @@ pub(crate) fn page(
                 div()
                     .mt(px(10.))
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .gap(px(8.))
                     .child(
                         Button::new("browse-temp")
                             .outline()
-                            .label("Browse…")
+                            .label(t(Key::CommonBrowse))
                             .on_click(cx.listener(|_, _, _, cx| {
                                 // Same off-thread picker as the save folder.
                                 cx.spawn(async move |this, cx| {
@@ -292,7 +693,7 @@ pub(crate) fn page(
                                 .detach();
                             })),
                     )
-                    .child(Button::new("open-temp").outline().label("Open").on_click({
+                    .child(Button::new("open-temp").outline().label(t(Key::CommonOpen)).on_click({
                         let temp = temp.clone();
                         move |_, _, cx: &mut App| {
                             crate::app::open_in_background(temp.clone(), cx);
@@ -304,18 +705,18 @@ pub(crate) fn page(
     // Connections --------------------------------------------------------
     let conns = prefs.conns;
     body = body.child(
-        card("Connections", pal)
+        card(t(Key::SettingsConnections), pal)
             .child(
                 div()
                     .text_sm()
                     .text_color(pal.muted)
-                    .child(format!("{conns} parallel parts per file")),
+                    .child(tf(Key::SettingsConnsLabel, &[&ltr_isolate(&conns.to_string())])),
             )
             .child(
                 div()
                     .mt(px(10.))
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .items_center()
                     .gap(px(8.))
                     .child(
@@ -350,9 +751,9 @@ pub(crate) fn page(
                     )
                     .child(
                         div()
-                            .ml(px(8.))
+                            .margin_start(px(8.))
                             .flex()
-                            .flex_row()
+                            .flex_row().mirror()
                             .gap(px(4.))
                             .children([1u32, 4, 8, 16, 32].into_iter().map(|n| {
                                 let weak = cx.entity().downgrade();
@@ -376,12 +777,12 @@ pub(crate) fn page(
     // Presets and the typed field are two modes, never both at once.
     let custom = view.limit_custom;
     body = body.child(
-        card("Speed limit", pal)
+        card(t(Key::SettingsSpeedLimit), pal)
             .child(
                 div()
                     .text_sm()
                     .text_color(pal.muted)
-                    .child("Total download speed shared by every active download."),
+                    .child(t(Key::SettingsSpeedHint)),
             )
             .child(
                 div()
@@ -392,17 +793,17 @@ pub(crate) fn page(
                     .child(
                         div()
                             .flex()
-                            .flex_row()
+                            .flex_row().mirror()
                             .flex_wrap()
                             .items_center()
                             .gap(px(6.))
                             .children(
                                 [
-                                    (0u64, "Unlimited".to_string()),
-                                    (512, format!("512 KB/s")),
-                                    (1024, format!("1 MB/s")),
-                                    (2048, format!("2 MB/s")),
-                                    (5120, format!("5 MB/s")),
+                                    (0u64, t(Key::SettingsUnlimited).to_string()),
+                                    (512, t(Key::SettingsLimit512).to_string()),
+                                    (1024, t(Key::SettingsLimit1m).to_string()),
+                                    (2048, t(Key::SettingsLimit2m).to_string()),
+                                    (5120, t(Key::SettingsLimit5m).to_string()),
                                 ]
                                 .into_iter()
                                 .map(|(kbps, label)| {
@@ -420,7 +821,7 @@ pub(crate) fn page(
                                                 let text = if kbps == 0 {
                                                     String::new()
                                                 } else {
-                                                    kbps.to_string()
+                                                    crate::text::fa_input(&kbps.to_string())
                                                 };
                                                 this.limit_input.update(cx, |state, cx| {
                                                     state.set_value(text, window, cx)
@@ -435,8 +836,8 @@ pub(crate) fn page(
                                 Button::new("limit-custom")
                                     .when(custom, |b| b.primary())
                                     .when(!custom, |b| b.outline())
-                                    .label("Custom")
-                                    .tooltip("Type any KB/s value of your own")
+                                    .label(t(Key::CommonCustom))
+                                    .tooltip(t(Key::SettingsCustomLimitTip))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.limit_custom = true;
                                         this.limit_input
@@ -448,7 +849,7 @@ pub(crate) fn page(
                     .child(
                         div()
                             .flex()
-                            .flex_row()
+                            .flex_row().mirror()
                             .items_center()
                             .gap(px(6.))
                             .when(!custom, |d| d.opacity(0.5))
@@ -456,7 +857,7 @@ pub(crate) fn page(
                                 div()
                                     .text_sm()
                                     .text_color(pal.muted)
-                                    .child("Custom"),
+                                    .child(t(Key::CommonCustom)),
                             )
                             .child(
                                 div()
@@ -467,14 +868,14 @@ pub(crate) fn page(
                                 div()
                                     .text_sm()
                                     .text_color(pal.muted)
-                                    .child("KB/s"),
+                                    .child(t(Key::UnitsKbps)),
                             )
                             .child(
                                 Button::new("limit-apply")
                                     .outline()
-                                    .label("Apply")
+                                    .label(t(Key::CommonApply))
                                     .disabled(!custom)
-                                    .tooltip("Apply the typed limit (Enter in the field or leaving it also applies)")
+                                    .tooltip(t(Key::SettingsApplyLimitTip))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let raw = this
                                             .limit_input
@@ -485,7 +886,7 @@ pub(crate) fn page(
                                         let kbps = if raw.is_empty() {
                                             0
                                         } else {
-                                            raw.parse::<u64>().unwrap_or(0)
+                                            crate::text::from_fa_digits(&raw).parse::<u64>().unwrap_or(0)
                                         };
                                         this.svc.apply(Command::SetLimitKbps(kbps));
                                         this.limit_custom = kbps != 0;
@@ -498,11 +899,11 @@ pub(crate) fn page(
                             .text_xs()
                             .text_color(pal.muted)
                             .child(if limit == 0 {
-                                "Unlimited — downloads use the full connection speed.".to_string()
+                                t(Key::SettingsUnlimitedStatus).to_string()
                             } else if custom {
-                                format!("Custom limit: {}", fmt_speed(limit * 1024))
+                                tf(Key::SettingsCustomLimitStatus, &[&ltr_isolate(&fmt_speed(limit * 1024))])
                             } else {
-                                format!("Preset limit: {}", fmt_speed(limit * 1024))
+                                tf(Key::SettingsPresetLimitStatus, &[&ltr_isolate(&fmt_speed(limit * 1024))])
                             }),
                     )
             ),
@@ -512,11 +913,11 @@ pub(crate) fn page(
     let retry_parts = prefs.retry_parts;
     let retry_after = prefs.retry_after;
     body = body.child(
-        card("Retry", pal)
+        card(t(Key::SettingsRetry), pal)
             .child(
                 div()
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .items_center()
                     .gap(px(10.))
                     .child(
@@ -535,14 +936,14 @@ pub(crate) fn page(
                         div()
                             .text_sm()
                             .text_color(pal.text)
-                            .child("Force re-download failed parts"),
+                            .child(t(Key::SettingsRetryParts)),
                     ),
             )
             .child(
                 div()
                     .mt(px(10.))
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .items_center()
                     .gap(px(8.))
                     .child(
@@ -566,7 +967,7 @@ pub(crate) fn page(
                             .text_center()
                             .text_sm()
                             .text_color(pal.text)
-                            .child(format!("{retry_after} s")),
+                            .child(tf(Key::SettingsRetryWaitValue, &[&ltr_isolate(&retry_after.to_string())])),
                     )
                     .child(
                         Button::new("retry-plus")
@@ -587,7 +988,7 @@ pub(crate) fn page(
                         div()
                             .text_sm()
                             .text_color(pal.muted)
-                            .child("Wait between attempts"),
+                            .child(t(Key::SettingsRetryWait)),
                     ),
             ),
     );
@@ -595,23 +996,23 @@ pub(crate) fn page(
     // Interface font -----------------------------------------------------
     let font = prefs.font.clone();
     let font_label = if font.trim().is_empty() {
-        "System default".to_string()
+        t(Key::SettingsFontSystem).to_string()
     } else {
         font.clone()
     };
     body = body.child(
-        card("Interface font", pal)
+        card(t(Key::SettingsFont), pal)
             .child(
                 div()
                     .text_sm()
                     .text_color(pal.muted)
-                    .child("Applies to every label, button and value in the app."),
+                    .child(t(Key::SettingsFontHint)),
             )
             .child(
                 div()
                     .mt(px(10.))
                     .flex()
-                    .flex_row()
+                    .flex_row().mirror()
                     .items_center()
                     .gap(px(8.))
                     .child(
@@ -629,7 +1030,7 @@ pub(crate) fn page(
                     .child(
                         Button::new("font-change")
                             .outline()
-                            .label("Change…")
+                            .label(t(Key::SettingsFontChange))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.font_dialog(window, cx);
                             })),
@@ -641,6 +1042,93 @@ pub(crate) fn page(
 }
 
 impl MainView {
+    /// Apply button: write the list and always report the result.
+    pub(crate) fn apply_direct_formats(&mut self, cx: &mut Context<Self>) {
+        self.save_direct_formats(true, true, cx);
+    }
+
+    /// Leaving the settings page: only write (and report) when the list
+    /// actually changed. Quitting passes `announce = false`.
+    pub(crate) fn flush_direct_formats(&mut self, announce: bool, cx: &mut Context<Self>) {
+        self.save_direct_formats(false, announce, cx);
+    }
+
+    fn save_direct_formats(
+        &mut self,
+        force: bool,
+        announce: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let raw = self.formats_input.read(cx).value().to_string();
+        let parsed = crate::core::prefs::collect_direct_formats(&raw);
+        let ignored = crate::core::prefs::invalid_direct_formats(&raw);
+        if parsed.is_empty() {
+            if force {
+                let message = if ignored.is_empty() {
+                    t(Key::SettingsFormatsEmpty).to_string()
+                } else {
+                    tf(Key::SettingsFormatsUnsupported, &[&ignored.join(", ")])
+                };
+                self.show_notice(message, true, cx);
+            }
+            return;
+        }
+        let changed = parsed != self.svc.prefs().direct_formats;
+        if !force && !changed {
+            return;
+        }
+        self.svc.apply(crate::core::Command::SetDirectFormats(
+            crate::core::prefs::format_direct_formats(&parsed),
+        ));
+        let path = crate::core::prefs::prefs_path();
+        let saved = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|json| {
+                json.get("direct_formats")
+                    .and_then(|value| value.as_array())
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|value| value.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .map(|actual| actual == parsed)
+            .unwrap_or(false);
+        crate::core::log::write(format!(
+            "saved {} file types to {path:?}: {}",
+            parsed.len(),
+            if saved { "ok" } else { "failed" }
+        ));
+        if saved {
+            if announce {
+                let mut message = tf(
+                    Key::SettingsFormatsSaved,
+                    &[&ltr_isolate(&parsed.len().to_string())],
+                );
+                if !ignored.is_empty() {
+                    message.push_str(&tf(Key::SettingsFormatsIgnored, &[&ignored.join(", ")]));
+                }
+                self.show_notice(message, false, cx);
+            }
+        } else if force || announce {
+            self.show_notice(
+                tf(Key::SettingsFormatsWriteFailed, &[&path.display().to_string()]),
+                true,
+                cx,
+            );
+        }
+    }
+
+    pub(crate) fn sync_formats_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = crate::core::prefs::format_direct_formats(&self.svc.prefs().direct_formats);
+        if self.formats_input.read(cx).value().as_ref() == text {
+            return;
+        }
+        self.formats_input
+            .update(cx, |state, cx| state.set_value(text, window, cx));
+    }
+
     /// Font picker for the GPUI build: every family the system reports, applied
     /// to the theme so labels, buttons and values change together.
     pub(crate) fn font_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -669,7 +1157,7 @@ impl MainView {
                 let target = name.clone();
                 let active = current.eq_ignore_ascii_case(&name);
                 let label = if name.is_empty() {
-                    "System default".to_string()
+                    t(Key::SettingsFontSystem).to_string()
                 } else {
                     name.clone()
                 };
@@ -680,7 +1168,7 @@ impl MainView {
                                 .into(),
                         ))
                         .flex()
-                        .flex_row()
+                        .flex_row().mirror()
                         .items_center()
                         .px(px(8.))
                         .py(px(5.))
@@ -696,7 +1184,7 @@ impl MainView {
                 );
             }
             dialog
-                .title("Interface font")
+                .title(t(Key::SettingsFont))
                 .child(
                     div()
                         .relative()
@@ -707,7 +1195,7 @@ impl MainView {
                 .footer(DialogFooter::new().child(
                     Button::new("font-cancel")
                         .outline()
-                        .label("Cancel")
+                        .label(t(Key::CommonCancel))
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 ))
         });
@@ -722,21 +1210,100 @@ impl MainView {
     }
 }
 
-fn card(title: &str, pal: Palette) -> Div {
+fn card(title: impl AsRef<str>, pal: Palette) -> Div {
     div()
         .flex()
         .flex_col()
+        .w_full()
         .p(px(16.))
         .rounded(px(12.))
         .bg(pal.card)
         .border_1()
         .border_color(pal.line)
+        .align_end()
         .child(
             div()
                 .mb(px(8.))
                 .text_sm()
                 .font_semibold()
                 .text_color(pal.text)
-                .child(title.to_string()),
+                .align_end()
+                .child(title.as_ref().to_string()),
         )
+}
+
+fn browser_modifier_button(
+    id: &'static str,
+    label: impl Into<String>,
+    value: &'static str,
+    selected: &str,
+    _pal: Palette,
+    cx: &mut Context<MainView>,
+) -> AnyElement {
+    Button::new(id)
+        .when(selected == value, |b| b.primary())
+        .when(selected != value, |b| b.outline())
+        .label(label.into())
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.svc.apply(Command::SetBrowserModifier(value.into()));
+            cx.notify();
+        }))
+        .into_any_element()
+}
+
+fn ui_lang_button(
+    id: &'static str,
+    label: impl Into<String>,
+    value: &'static str,
+    selected: &str,
+    _pal: Palette,
+    cx: &mut Context<MainView>,
+) -> AnyElement {
+    Button::new(id)
+        .when(selected == value, |b| b.primary())
+        .when(selected != value, |b| b.outline())
+        .label(label.into())
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.svc.apply(Command::SetUiLang(value.into()));
+            let lang = crate::core::prefs::normalize_ui_lang(value);
+            crate::i18n::apply(&lang);
+            cx.notify();
+        }))
+        .into_any_element()
+}
+
+fn proxy_mode_button(
+    id: &'static str,
+    label: impl Into<String>,
+    value: &'static str,
+    selected: &str,
+    cx: &mut Context<MainView>,
+) -> AnyElement {
+    Button::new(id)
+        .when(selected == value, |b| b.primary())
+        .when(selected != value, |b| b.outline())
+        .label(label.into())
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.svc.apply(Command::SetProxyMode(value.into()));
+            cx.notify();
+        }))
+        .into_any_element()
+}
+
+fn proxy_kind_button(
+    id: &'static str,
+    label: impl Into<String>,
+    value: &'static str,
+    selected: &str,
+    cx: &mut Context<MainView>,
+) -> AnyElement {
+    Button::new(id)
+        .when(selected == value, |b| b.primary())
+        .when(selected != value, |b| b.outline())
+        .label(label.into())
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.svc.apply(Command::SetProxyKind(value.into()));
+            cx.notify();
+        }))
+        .into_any_element()
 }

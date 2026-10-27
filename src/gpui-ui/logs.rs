@@ -1,5 +1,7 @@
 //! Temporary debug-log window. It lives in its own native window so it does
 //! not cover the download manager.
+use crate::i18n::{t, tf, Key};
+use crate::rtl::Mirror as _;
 use crate::theme::Palette;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -51,16 +53,13 @@ impl Render for LogView {
                             .text_lg()
                             .font_semibold()
                             .text_color(pal.text)
-                            .child("Debug log"),
+                            .child(t(Key::LogsTitle)),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(pal.muted)
-                            .child(format!(
-                                "{} — select text and Ctrl+C, or use Copy all.",
-                                path.to_string_lossy()
-                            )),
+                            .child(tf(Key::LogsHint, &[&path.to_string_lossy()])),
                     ),
             )
             .child(
@@ -75,6 +74,7 @@ impl Render for LogView {
                 div()
                     .flex()
                     .flex_row()
+                    .mirror()
                     .justify_end()
                     .gap(px(8.))
                     .px(px(16.))
@@ -82,7 +82,7 @@ impl Render for LogView {
                     .child(
                         Button::new("log-refresh")
                             .outline()
-                            .label("Refresh")
+                            .label(t(Key::LogsRefresh))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 let text = crate::core::log::snapshot().join("\n");
                                 this.text.update(cx, |state, cx| {
@@ -93,7 +93,7 @@ impl Render for LogView {
                     .child(
                         Button::new("log-copy")
                             .outline()
-                            .label("Copy all")
+                            .label(t(Key::LogsCopyAll))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let text = this.text.read(cx).value().to_string();
                                 let _ = crate::clipboard::write_text(&text);
@@ -102,7 +102,7 @@ impl Render for LogView {
                     .child(
                         Button::new("log-open")
                             .outline()
-                            .label("Open file")
+                            .label(t(Key::LogsOpenFile))
                             .on_click(move |_, _, cx: &mut App| {
                                 crate::app::open_in_background(path.clone(), cx);
                             }),
@@ -110,7 +110,7 @@ impl Render for LogView {
                     .child(
                         Button::new("log-close")
                             .primary()
-                            .label("Close")
+                            .label(t(Key::CommonClose))
                             .on_click(|_, window, _cx| window.remove_window()),
                     ),
             )

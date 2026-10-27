@@ -19,10 +19,13 @@ mod tests;
 
 mod app;
 mod downloads;
+mod i18n;
 mod logs;
+mod rtl;
 mod settings;
 mod shell;
 mod sidebar;
+mod text;
 mod theme;
 mod toast;
 

@@ -1,5 +1,6 @@
 //! Custom desktop notification shown in its own borderless, top-most window.
 use crate::app::MainView;
+use crate::rtl::{DirEdge as _, Mirror as _};
 use crate::theme::{with_alpha, Palette};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -91,7 +92,7 @@ impl Render for ToastView {
             .id("toast-root")
             .size_full()
             .flex()
-            .flex_row()
+            .flex_row().mirror()
             .items_center()
             .gap(px(12.))
             .rounded(px(14.))
@@ -137,8 +138,7 @@ impl Render for ToastView {
                         div()
                             .text_xs()
                             .text_color(pal.muted)
-                            .overflow_hidden()
-                            .text_ellipsis()
+                            .ellipsize_ui()
                             .child(message),
                     ),
             )

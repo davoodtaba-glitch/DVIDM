@@ -1,5 +1,28 @@
 const API = "http://127.0.0.1:52137";
 
+// Settings published by the app. Content scripts ask the worker instead of
+// fetching localhost themselves: Chrome's local-network protection blocks
+// page-initiated requests to 127.0.0.1 from public sites.
+let config = { formats: [], modifier: "both", at: 0 };
+let configFetch = null;
+
+function loadConfig() {
+  if (Date.now() - config.at < 2000) return Promise.resolve(config);
+  if (configFetch) return configFetch;
+  configFetch = fetch(`${API}/formats`, { cache: "no-store" })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (data && Array.isArray(data.formats)) config.formats = data.formats;
+      if (data && typeof data.modifier === "string") config.modifier = data.modifier;
+      config.at = Date.now();
+    })
+    .catch(() => {})
+    .finally(() => {
+      configFetch = null;
+    });
+  return configFetch.then(() => config);
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
@@ -34,17 +57,182 @@ chrome.contextMenus.onClicked.addListener((info) => {
     copySelectedLinks(info);
     return;
   }
+  if (info.menuItemId === "dvidm-link" && info.linkUrl) {
+    // Feed the link through Chrome's download engine first: that resolves the
+    // login redirect and gives the real CDN URL, which a plain /add cannot.
+    armTakeover(info.linkUrl, false);
+    startMenuFallback(info.linkUrl);
+    chrome.downloads.download({ url: info.linkUrl }, () => {
+      if (!chrome.runtime.lastError) return;
+      cancelMenuFallback();
+      resetArm();
+      sendToDvidm([info.linkUrl]);
+    });
+    return;
+  }
   const url = info.linkUrl || info.pageUrl;
   if (url) sendToDvidm([url]);
 });
 
-// Ctrl/Alt+click on a file link: add it straight to DVIDM, no review window.
+// A modified click whose URL does not look like a file can still start a
+// browser download (Content-Disposition, scripted buttons). Let Chrome resolve
+// the redirect (signed CDN link) and the server filename, then take it over.
+const ARM_WINDOW_MS = 8000;
+const ARM_WINDOW_NO_HREF_MS = 3000;
+let armedAt = 0;
+let armedHref = "";
+let armedDirect = true;
+const MENU_ALARM = "dvidm-menu-fallback";
+
+function cancelMenuFallback() {
+  chrome.alarms.clear(MENU_ALARM);
+  chrome.storage.session.remove("dvidmMenuUrl");
+}
+
+/// The context menu is an explicit "send this to DVIDM". Chrome only reports
+/// the download after the server answers, so a dead/slow link would otherwise
+/// never reach the app; hand the original URL over after a grace period.
+/// Alarms wake the service worker again even if Chrome suspended it.
+function startMenuFallback(url) {
+  cancelMenuFallback();
+  chrome.storage.session.set({ dvidmMenuUrl: url });
+  chrome.alarms.create(MENU_ALARM, { when: Date.now() + 6000 });
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== MENU_ALARM) return;
+  chrome.storage.session.get("dvidmMenuUrl", (data) => {
+    const url = data && data.dvidmMenuUrl;
+    if (!url) return;
+    chrome.storage.session.remove("dvidmMenuUrl");
+    resetArm();
+    sendToDvidm([url], false);
+  });
+});
+
+function armTakeover(href, direct) {
+  armedAt = Date.now();
+  armedHref = href || "";
+  armedDirect = direct !== false;
+}
+
+function resetArm() {
+  armedAt = 0;
+  armedHref = "";
+  armedDirect = true;
+}
+
+function sameTarget(a, b) {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    return ua.origin === ub.origin && ua.pathname === ub.pathname;
+  } catch (err) {
+    return a === b;
+  }
+}
+
+// Ctrl/Alt/Shift/Insert+click on a file link: add it straight to DVIDM.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === "dvidm-config") {
+    loadConfig().then((c) => sendResponse({ formats: c.formats, modifier: c.modifier }));
+    return true;
+  }
+  if (message && message.type === "dvidm-arm") {
+    armTakeover(typeof message.href === "string" ? message.href : "", true);
+    return false;
+  }
+  if (message && message.type === "dvidm-disarm") {
+    resetArm();
+    return false;
+  }
   if (!message || message.type !== "dvidm-direct" || typeof message.url !== "string") {
     return false;
   }
-  sendToDvidm([message.url], true).then((ok) => sendResponse({ ok }));
+  sendToDvidm([message.url], true).then((ok) => {
+    // The click was already consumed; if DVIDM is not running, let Chrome
+    // download the file instead of losing it.
+    if (!ok) chrome.downloads.download({ url: message.url });
+    sendResponse({ ok });
+  });
   return true;
+});
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function dvidmAlive() {
+  try {
+    const res = await fetch(`${API}/ping`, { cache: "no-store" });
+    return res.ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+function downloadInfo(id) {
+  return new Promise((resolve) => {
+    chrome.downloads.search({ id }, (items) => {
+      resolve(items && items[0] ? items[0] : null);
+    });
+  });
+}
+
+function cancelDownload(id) {
+  return new Promise((resolve) => {
+    chrome.downloads.cancel(id, () => {
+      chrome.downloads.erase({ id }, () => resolve());
+    });
+  });
+}
+
+async function takeOverDownload(id, direct = true) {
+  if (!(await dvidmAlive())) return;
+  let info = null;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    info = await downloadInfo(id);
+    if (!info) return;
+    if (info.finalUrl && info.filename) break;
+    await sleep(150);
+  }
+  if (!info) return;
+  const url = info.finalUrl || info.url;
+  if (!/^https?:\/\//i.test(url)) return;
+  // The app may have closed while Chrome was resolving the redirect.
+  if (!(await dvidmAlive())) return;
+  const name = info.filename ? info.filename.split(/[\\/]/).pop() : "";
+  await cancelDownload(id);
+  const ok = await sendToDvidm([url], direct, name);
+  if (!ok) chrome.downloads.download({ url, filename: name || undefined });
+}
+
+function armedNow(item) {
+  if (!armedAt) return false;
+  const limit = armedHref ? ARM_WINDOW_MS : ARM_WINDOW_NO_HREF_MS;
+  if (Date.now() - armedAt > limit) return false;
+  if (!armedHref) return true;
+  if (sameTarget(item.url || "", armedHref)) return true;
+  return Boolean(item.finalUrl && sameTarget(item.finalUrl, armedHref));
+}
+
+function takeArmed(item) {
+  const direct = armedDirect;
+  cancelMenuFallback();
+  resetArm();
+  void takeOverDownload(item.id, direct);
+}
+
+chrome.downloads.onCreated.addListener((item) => {
+  if (armedNow(item)) {
+    takeArmed(item);
+    return;
+  }
+  // The arm message from mousedown may still be in flight while the service
+  // worker wakes up; give it a moment before letting Chrome keep the file.
+  setTimeout(() => {
+    if (armedNow(item)) takeArmed(item);
+  }, 400);
 });
 
 function collectForSelection(info) {
@@ -128,7 +316,7 @@ async function copyToClipboard(text) {
   return false;
 }
 
-async function sendToDvidm(urls, direct = false) {
+async function sendToDvidm(urls, direct = false, fileName = "") {
   const unique = [...new Set(urls.filter((u) => /^https?:\/\//i.test(u)))];
   if (!unique.length) {
     showBadge("0", "#f59e0b");
@@ -141,7 +329,7 @@ async function sendToDvidm(urls, direct = false) {
         "Content-Type": "application/json",
         "X-DVIDM": "chrome"
       },
-      body: JSON.stringify({ urls: unique, direct })
+      body: JSON.stringify({ urls: unique, direct, file_name: fileName || null })
     });
     if (!res.ok) throw new Error(await res.text());
     showBadge(String(unique.length), "#22c55e");

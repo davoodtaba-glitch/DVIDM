@@ -6,16 +6,36 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 pub(crate) const PORT: u16 = 52137;
+
+/// Extensions served to the browser extension for the Ctrl/Alt+click
+/// shortcut; kept in sync with the settings by [`set_direct_formats`].
+static DIRECT_FORMATS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static BROWSER_MODIFIER: LazyLock<Mutex<String>> =
+    LazyLock::new(|| Mutex::new("both".to_string()));
+
+pub(crate) fn set_direct_formats(list: Vec<String>) {
+    if let Ok(mut slot) = DIRECT_FORMATS.lock() {
+        *slot = list;
+    }
+}
+
+pub(crate) fn set_browser_modifier(modifier: String) {
+    if let Ok(mut slot) = BROWSER_MODIFIER.lock() {
+        *slot = modifier;
+    }
+}
 
 /// A batch of links from the browser, and whether the user asked for an
 /// immediate download instead of the review window.
 pub(crate) struct RemoteBatch {
     pub(crate) urls: Vec<String>,
     pub(crate) direct: bool,
+    /// Server-provided filename for a direct download (Content-Disposition).
+    pub(crate) file_name: Option<String>,
 }
 
 pub(crate) fn start(
@@ -76,7 +96,9 @@ fn handle(
         }
     }
 
-    let origin_allowed = origin.is_empty() || origin.starts_with("chrome-extension://");
+    let origin_allowed = origin.is_empty()
+        || origin.starts_with("chrome-extension://")
+        || (path == "/formats" && (method == "GET" || method == "OPTIONS"));
 
     if method == "OPTIONS" {
         if !origin_allowed {
@@ -89,6 +111,21 @@ fn handle(
 
     if !origin_allowed {
         respond(&mut stream, 403, "Forbidden", "text/plain", &cors(&origin));
+        return;
+    }
+
+    if method == "GET" && path == "/formats" {
+        let list = DIRECT_FORMATS.lock().map(|slot| slot.clone()).unwrap_or_default();
+        let modifier = BROWSER_MODIFIER
+            .lock()
+            .map(|slot| slot.clone())
+            .unwrap_or_else(|_| "both".to_string());
+        let body = serde_json::to_string(&serde_json::json!({
+            "formats": list,
+            "modifier": modifier
+        }))
+        .unwrap_or_else(|_| r#"{"formats":[],"modifier":"both"}"#.to_string());
+        respond(&mut stream, 200, &body, "application/json", &cors("*"));
         return;
     }
 
@@ -122,6 +159,18 @@ fn handle(
             .and_then(|v| v.get("direct"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let file_name = value
+            .as_ref()
+            .and_then(|v| v.get("file_name"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && s.len() <= 200)
+            .map(|s| {
+                s.rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(s)
+                    .to_string()
+            });
         let mut urls: Vec<String> = Vec::new();
         if let Some(value) = value {
             if let Some(list) = value.get("urls").and_then(|v| v.as_array()) {
@@ -157,6 +206,7 @@ fn handle(
             .send(RemoteBatch {
                 urls,
                 direct,
+                file_name,
             })
             .is_err()
         {
@@ -180,8 +230,9 @@ fn cors(origin: &str) -> String {
     let allow = if origin.is_empty() { "*" } else { origin };
     format!(
         "Access-Control-Allow-Origin: {allow}\r\n\
-         Access-Control-Allow-Methods: POST, OPTIONS\r\n\
+         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
          Access-Control-Allow-Headers: content-type, x-dvidm\r\n\
+         Access-Control-Allow-Private-Network: true\r\n\
          Access-Control-Max-Age: 600\r\n"
     )
 }

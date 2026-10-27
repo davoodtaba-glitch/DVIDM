@@ -4,6 +4,9 @@ use crate::app::{MainView, SortCol};
 use crate::core::Command;
 use crate::engine::{Category, Snapshot, Status};
 use crate::format::{eta_text, fmt_speed, size_text};
+use crate::i18n::{self, t, tf, Key};
+use crate::rtl::{AlignEnd as _, DirEdge as _, Mirror as _};
+use crate::text::{self, ltr_isolate};
 use crate::theme::{with_alpha, Palette};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -21,10 +24,10 @@ const ROW_GAP: f32 = 10.0;
 
 // Column widths. The file column takes whatever is left.
 const NUM_W: f32 = 34.0;
-const STATUS_W: f32 = 92.0;
+const STATUS_W: f32 = 108.0;
 const LISTS_W: f32 = 36.0;
 const SIZE_W: f32 = 116.0;
-const PROGRESS_W: f32 = 58.0;
+const PROGRESS_W: f32 = 66.0;
 const SPEED_W: f32 = 74.0;
 const ETA_W: f32 = 56.0;
 const PARTS_W: f32 = 36.0;
@@ -107,7 +110,7 @@ pub(crate) fn in_view(listed: Option<&HashSet<String>>, filter: Category, s: &Sn
 
 /// Rows the table shows after the category/list filter, search and sort.
 pub(crate) fn visible(view: &MainView) -> Vec<Snapshot> {
-    let query = view.search_query.trim().to_lowercase();
+    let query = text::fold_search(view.search_query.trim());
     let listed: Option<HashSet<String>> = view.list_filter.as_ref().and_then(|name| {
         view.svc
             .lists()
@@ -121,7 +124,7 @@ pub(crate) fn visible(view: &MainView) -> Vec<Snapshot> {
         .snaps
         .iter()
         .filter(|s| in_view(listed.as_ref(), view.filter, s))
-        .filter(|s| query.is_empty() || s.name.to_lowercase().contains(&query))
+        .filter(|s| query.is_empty() || text::fold_search(&s.name).contains(&query))
         .cloned()
         .collect();
     if let Some((col, desc)) = view.sort {
@@ -129,7 +132,7 @@ pub(crate) fn visible(view: &MainView) -> Vec<Snapshot> {
             let ord = match col {
                 SortCol::Num => a.order.cmp(&b.order),
                 SortCol::Status => status_rank(a.status).cmp(&status_rank(b.status)),
-                SortCol::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortCol::Name => text::fold_search(&a.name).cmp(&text::fold_search(&b.name)),
                 SortCol::Size => a.total.unwrap_or(0).cmp(&b.total.unwrap_or(0)),
                 SortCol::Progress => progress_ratio(a).total_cmp(&progress_ratio(b)),
                 SortCol::Speed => a.speed.cmp(&b.speed),
@@ -190,9 +193,9 @@ pub(crate) fn table(
 
     if rows.is_empty() {
         let (title, hint) = if total_rows == 0 {
-            ("No downloads", "Paste a link above and press Download.")
+            (t(Key::EmptyTitle), t(Key::EmptyHint))
         } else {
-            ("Nothing matches", "Try another category or clear the search.")
+            (t(Key::NoMatchTitle), t(Key::NoMatchHint))
         };
         return div()
             .flex()
@@ -208,8 +211,8 @@ pub(crate) fn table(
                     .justify_center()
                     .gap(px(6.))
                     .flex_1()
-                    .child(div().text_lg().font_semibold().text_color(pal.text).child(title))
-                    .child(div().text_sm().text_color(pal.muted).child(hint)),
+                    .child(div().text_lg().font_semibold().text_color(pal.text).align_end().child(title))
+                    .child(div().text_sm().text_color(pal.muted).align_end().child(hint)),
             )
             .into_any_element();
     }
@@ -297,7 +300,7 @@ pub(crate) fn table(
                     .px(px(20.))
                     .text_xs()
                     .text_color(pal.muted)
-                    .child(format!("{selected_count} selected")),
+                    .child(tf(Key::SelectedCount, &[&ltr_isolate(&selected_count.to_string())])),
             )
         })
         .into_any_element()
@@ -318,6 +321,7 @@ fn header_row(
         .w_full()
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .gap(px(8.))
         .h(px(34.))
@@ -348,27 +352,27 @@ fn header_row(
                     }
                 }),
         )
-        .child(sort_label("#", SortCol::Num, sort, weak.clone(), pal, false))
+        .child(sort_label(t(Key::ColNum), SortCol::Num, sort, weak.clone(), pal, false))
         .child(sort_label(
-            "Status",
+            t(Key::ColStatus),
             SortCol::Status,
             sort,
             weak.clone(),
             pal,
             false,
         ))
-        .child(cell(LISTS_W, "Lists"))
+        .child(cell(LISTS_W, t(Key::ColLists)))
         .child(sort_label(
-            "File name",
+            t(Key::ColFileName),
             SortCol::Name,
             sort,
             weak.clone(),
             pal,
             true,
         ))
-        .child(sort_label("Size", SortCol::Size, sort, weak.clone(), pal, false))
+        .child(sort_label(t(Key::ColSize), SortCol::Size, sort, weak.clone(), pal, false))
         .child(sort_label(
-            "Progress",
+            t(Key::ColProgress),
             SortCol::Progress,
             sort,
             weak.clone(),
@@ -376,82 +380,91 @@ fn header_row(
             false,
         ))
         .child(sort_label(
-            "Speed",
+            t(Key::ColSpeed),
             SortCol::Speed,
             sort,
             weak.clone(),
             pal,
             false,
         ))
-        .child(sort_label("ETA", SortCol::Eta, sort, weak.clone(), pal, false))
-        .child(cell(PARTS_W, "Parts"))
+        .child(sort_label(t(Key::ColEta), SortCol::Eta, sort, weak.clone(), pal, false))
+        .child(cell(PARTS_W, t(Key::ColParts)))
         .child(sort_label(
-            "Last date",
+            t(Key::ColLastDate),
             SortCol::LastDate,
             sort,
             weak,
             pal,
             false,
         ))
-        .child(cell(ACTIONS_W, "Actions"))
+        .child(cell(ACTIONS_W, t(Key::ColActions)))
         .into_any_element()
 }
 
-fn cell(width: f32, label: &str) -> AnyElement {
+fn cell(width: f32, label: impl AsRef<str>) -> AnyElement {
     div()
         .w(px(width))
         .flex_shrink_0()
-        .child(label.to_string())
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .align_end()
+        .child(label.as_ref().to_string())
         .into_any_element()
 }
 
 fn sort_label(
-    label: &str,
+    label: impl AsRef<str>,
     col: SortCol,
     sort: Option<(SortCol, bool)>,
     weak: WeakEntity<MainView>,
     pal: Palette,
     grow: bool,
 ) -> AnyElement {
+    let label = label.as_ref();
     let active = sort.map(|(c, _)| c) == Some(col);
     let desc = sort.map_or(false, |(c, d)| c == col && d);
+    let arrow = Icon::new(if desc {
+        IconName::ArrowDown
+    } else {
+        IconName::ArrowUp
+    })
+    .size(px(9.))
+    .flex_shrink_0()
+    .text_color(if active {
+        pal.accent
+    } else {
+        with_alpha(pal.muted, 0.45)
+    });
+    let text = label.to_string();
     let el = div()
         .id(ElementId::Name(format!("sort-{label}").into()))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(4.))
+        .gap(px(3.))
         .h_full()
+        .overflow_hidden()
+        .whitespace_nowrap()
         .cursor_pointer()
         .text_color(if active { pal.text } else { pal.muted })
         .on_click(move |_, _, cx: &mut App| {
             weak.update(cx, |this, cx| this.set_sort(col, cx)).ok();
-        })
-        .child(label.to_string())
-        // Every sortable column carries its triangle, dim until it is used.
-        .child(
-            Icon::new(if desc {
-                IconName::ArrowDown
-            } else {
-                IconName::ArrowUp
-            })
-            .size(px(9.))
-            .text_color(if active {
-                pal.accent
-            } else {
-                with_alpha(pal.muted, 0.45)
-            }),
-        );
-    if grow {
-        el.w_full()
+        });
+    let el = if crate::rtl::on() {
+        el.justify_end().child(arrow).child(text)
     } else {
-        let w = match label {
-            "Status" => STATUS_W,
-            "Size" => SIZE_W,
-            "Progress" => PROGRESS_W,
-            "Speed" => SPEED_W,
-            "ETA" => ETA_W,
-            "Last date" => LAST_W,
+        el.child(text).child(arrow)
+    };
+    if grow {
+        el.flex_1().min_w_0()
+    } else {
+        let w = match col {
+            SortCol::Status => STATUS_W,
+            SortCol::Size => SIZE_W,
+            SortCol::Progress => PROGRESS_W,
+            SortCol::Speed => SPEED_W,
+            SortCol::Eta => ETA_W,
+            SortCol::LastDate => LAST_W,
             _ => NUM_W,
         };
         el.w(px(w)).flex_shrink_0()
@@ -476,19 +489,7 @@ fn row(
     } else {
         pal.status(snap.status)
     };
-    let status_label = if scheduled && snap.status == Status::Paused {
-        "Scheduled"
-    } else if auto && snap.status == Status::Paused {
-        "Queued"
-    } else {
-        match snap.status {
-            Status::Connecting => "Connecting",
-            Status::Downloading => "Active",
-            Status::Paused => "Paused",
-            Status::Done => "Completed",
-            Status::Failed => "Failed",
-        }
-    };
+    let status_label = i18n::row_status_label(snap.status, scheduled, auto);
     let name = snap.name.clone();
     let size = size_text(&snap);
     let pct = if snap.total.unwrap_or(0) > 0 {
@@ -534,9 +535,9 @@ fn row(
             })
             .text_color(pal.accent)
             .tooltip(if done {
-                "Open the file — right-click to open its folder"
+                t(Key::RowOpenFileTip)
             } else {
-                "Open the download folder"
+                t(Key::RowOpenFolderTip)
             })
             .on_click(move |_, _, cx: &mut App| {
                 let target = if done {
@@ -568,19 +569,19 @@ fn row(
             (
                 gpui_kit::assets::IconName::RotateCw,
                 pal.warn,
-                "Download again — choose whether to keep the old file",
+                t(Key::RowRedownloadTip),
             )
         } else if running {
             (
                 gpui_kit::assets::IconName::Pause,
                 pal.warn,
-                "Pause this download",
+                t(Key::RowPauseTip),
             )
         } else {
             (
                 gpui_kit::assets::IconName::Play,
                 pal.ok,
-                "Start this download",
+                t(Key::RowStartTip),
             )
         };
         Button::new(ElementId::Name(format!("toggle-{id}").into()))
@@ -621,7 +622,7 @@ fn row(
             .compact()
             .icon(IconName::Inbox)
             .text_color(pal.paused)
-            .tooltip("Add to list")
+            .tooltip(t(Key::RowAddToListTip))
             .on_click(move |_, window, cx: &mut App| {
                 let id = id.clone();
                 weak.update(cx, |this, cx| {
@@ -642,7 +643,7 @@ fn row(
             .compact()
             .icon(IconName::Delete)
             .text_color(pal.bad)
-            .tooltip("Delete this download")
+            .tooltip(t(Key::RowDeleteTip))
             .on_click(move |_, _, cx: &mut App| {
                 weak.update(cx, |this, cx| {
                     this.svc.apply(Command::Remove {
@@ -717,6 +718,7 @@ fn row(
         .hover(|s| s.border_color(with_alpha(pal.accent, 0.38)))
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .gap(px(8.))
         .child(
@@ -770,7 +772,7 @@ fn row(
                 .flex_shrink_0()
                 .text_xs()
                 .text_color(if selected { pal.text } else { pal.muted })
-                .child(format!("#{num}")),
+                .child(ltr_isolate(&format!("#{num}"))),
         )
         .child(
             div()
@@ -784,6 +786,7 @@ fn row(
                 .flex_shrink_0()
                 .flex()
                 .flex_row()
+                .mirror()
                 .gap(px(3.))
                 .children(dots.iter().take(2).map(|c| {
                     Icon::new(gpui_kit::assets::IconName::List)
@@ -797,6 +800,7 @@ fn row(
                 .min_w_0()
                 .flex()
                 .flex_row()
+                .mirror()
                 .items_center()
                 .gap(px(9.))
                 .child(file_badge(&name, pal))
@@ -816,17 +820,17 @@ fn row(
                                 .text_sm()
                                 .font_semibold()
                                 .text_color(pal.text)
-                                .text_ellipsis()
+                                .ellipsize_ui()
                                 .child(name.clone()),
                         )
                         .child(bar),
                 ),
         )
-        .child(cell_text(SIZE_W, size, pal.text))
-        .child(cell_text(PROGRESS_W, pct, pal.text))
-        .child(cell_text(SPEED_W, speed, pal.text))
-        .child(cell_text(ETA_W, eta, pal.muted))
-        .child(cell_text(PARTS_W, parts, pal.muted))
+        .child(cell_text(SIZE_W, ltr_isolate(&size), pal.text))
+        .child(cell_text(PROGRESS_W, ltr_isolate(&pct), pal.text))
+        .child(cell_text(SPEED_W, ltr_isolate(&speed), pal.text))
+        .child(cell_text(ETA_W, ltr_isolate(&eta), pal.muted))
+        .child(cell_text(PARTS_W, ltr_isolate(&parts), pal.muted))
         .child({
             let full = last_download_full(&snap);
             div()
@@ -837,7 +841,7 @@ fn row(
                     Button::new(ElementId::Name(format!("last-{id}").into()))
                         .ghost()
                         .compact()
-                        .label(last_download_text(&snap))
+                        .label(ltr_isolate(&last_download_text(&snap)))
                         .text_color(pal.muted)
                         .tooltip(full),
                 )
@@ -848,6 +852,7 @@ fn row(
                 .flex_shrink_0()
                 .flex()
                 .flex_row()
+                .mirror()
                 .items_center()
                 .gap(px(2.))
                 .child(action)
@@ -865,15 +870,17 @@ fn cell_text(width: f32, text: String, color: Hsla) -> AnyElement {
         .overflow_hidden()
         .text_sm()
         .text_color(color)
-        .text_ellipsis()
+        .ellipsize_ui()
+        .align_end()
         .child(text)
         .into_any_element()
 }
 
-fn status_pill(label: &str, color: Hsla) -> AnyElement {
+fn status_pill(label: impl AsRef<str>, color: Hsla) -> AnyElement {
     div()
         .flex()
         .flex_row()
+        .mirror()
         .items_center()
         .justify_center()
         .px(px(10.))
@@ -882,18 +889,23 @@ fn status_pill(label: &str, color: Hsla) -> AnyElement {
         .bg(with_alpha(color, 0.15))
         .border_1()
         .border_color(with_alpha(color, 0.42))
-        .child(div().text_xs().text_color(color).child(label.to_string()))
+        .child(div().text_xs().text_color(color).child(label.as_ref().to_string()))
         .into_any_element()
 }
 
 fn file_badge(name: &str, pal: &Palette) -> AnyElement {
     let color = pal.file_color(name);
     let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-    let label = if ext.is_empty() || ext.len() > 4 {
-        "FILE".to_string()
+    let mut label: String = ext
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(3)
+        .collect();
+    if label.is_empty() {
+        label = "FILE".into();
     } else {
-        ext.to_ascii_uppercase()
-    };
+        label.make_ascii_uppercase();
+    }
     div()
         .size(px(30.))
         .flex_shrink_0()
@@ -949,7 +961,8 @@ fn progress_bar(snap: &Snapshot, pal: &Palette) -> AnyElement {
         .bg(pal.track)
         .overflow_hidden()
         .flex()
-        .flex_row();
+        .flex_row()
+        .mirror();
 
     if snap.status == Status::Done && total > 0 {
         return track
@@ -958,7 +971,7 @@ fn progress_bar(snap: &Snapshot, pal: &Palette) -> AnyElement {
     }
 
     if total > 0 && !snap.parts.is_empty() {
-        let mut segments = div().flex().flex_row().h_full().w_full().gap(px(1.));
+        let mut segments = div().flex().flex_row().mirror().h_full().w_full().gap(px(1.));
         // Parts keep their creation order, and split-off tails are appended, so
         // sort by byte offset before drawing the strip.
         let mut ordered: Vec<&(u64, u64, u64)> = snap.parts.iter().collect();

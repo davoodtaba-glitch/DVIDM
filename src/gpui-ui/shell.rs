@@ -5,6 +5,7 @@
 //! Windows' message loop; two blocking threads forward them into an async
 //! channel, which keeps the hidden application completely idle between events.
 use crate::core::sys;
+use crate::i18n::{t, tf, Key};
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,7 +20,9 @@ pub(crate) enum TrayMsg {
 }
 
 pub(crate) struct Tray {
-    _icon: TrayIcon,
+    icon: TrayIcon,
+    open: MenuItem,
+    exit: MenuItem,
     rx: Option<smol::channel::Receiver<TrayMsg>>,
 }
 
@@ -28,17 +31,14 @@ impl Tray {
     pub(crate) fn install(quitting: Arc<AtomicBool>) -> Option<Self> {
         let open_id = MenuId::new("open");
         let exit_id = MenuId::new("exit");
-        let open = MenuItem::with_id(open_id.clone(), "Open", true, None);
-        let exit = MenuItem::with_id(exit_id.clone(), "Exit", true, None);
+        let open = MenuItem::with_id(open_id.clone(), t(Key::TrayOpen), true, None);
+        let exit = MenuItem::with_id(exit_id.clone(), t(Key::TrayExit), true, None);
         let menu = Menu::new();
         let _ = menu.append(&open);
         let _ = menu.append(&exit);
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip(format!(
-                "DV Internet Download Manager {}",
-                env!("CARGO_PKG_VERSION")
-            ))
+            .with_tooltip(tf(Key::TrayTooltip, &[env!("CARGO_PKG_VERSION")]))
             .with_icon(make_icon()?)
             .build()
             .ok()?;
@@ -92,9 +92,19 @@ impl Tray {
             .ok()?;
 
         Some(Self {
-            _icon: icon,
+            icon,
+            open,
+            exit,
             rx: Some(rx),
         })
+    }
+
+    pub(crate) fn relabel(&self) {
+        self.open.set_text(t(Key::TrayOpen));
+        self.exit.set_text(t(Key::TrayExit));
+        let _ = self
+            .icon
+            .set_tooltip(Some(tf(Key::TrayTooltip, &[env!("CARGO_PKG_VERSION")])));
     }
 
     /// Hand the event stream to the view task; the icon keeps living here.
