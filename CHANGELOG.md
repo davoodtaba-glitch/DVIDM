@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.69
+
+- **Open folder:** opening a download's folder now selects the file in Windows Explorer when it exists.
+- Rebuilt installer and portable package with extension 0.5.16.
+
+## 0.5.68
+
+- **Safer delete:** the row delete button now asks first and offers to delete the completed file from disk as well.
+
+## 0.5.67
+
+- **Startup update notice:** when a newer version is available, a fading message appears at the bottom-right when DVIDM starts.
+
 ## 0.5.66
 
 - **List controls:** every download list in the sidebar now has a small play/pause button. Start or pause the whole list without opening it.

@@ -330,7 +330,7 @@
   "ClipAdd": "Add",
   "DeleteTitleOne": "Delete {0} download?",
   "DeleteTitleMany": "Delete {0} downloads?",
-  "DeleteBody": "Queued transfers stop and disappear from the list.",
+  "DeleteBody": "The download is removed from the list. You can also delete its file from disk.",
   "DeleteFiles": "Also delete the downloaded files from disk",
   "ShutdownCountdown": "Shutting down in {0}s",
   "ShutdownBody": "A download list reached the end of its schedule and is set to power off the PC.",

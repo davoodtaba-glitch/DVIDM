@@ -540,20 +540,23 @@ fn row(
                 t(Key::RowOpenFolderTip)
             })
             .on_click(move |_, _, cx: &mut App| {
-                let target = if done {
-                    std::path::PathBuf::from(&dest_click)
+                if done {
+                    crate::app::open_in_background(
+                        std::path::PathBuf::from(&dest_click),
+                        cx,
+                    );
                 } else {
-                    std::path::Path::new(&dest_click)
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| std::path::PathBuf::from(&dest_click))
-                };
-                crate::app::open_in_background(target, cx);
+                    crate::app::open_folder_selecting(
+                        std::path::PathBuf::from(&dest_click),
+                        cx,
+                    );
+                }
             })
             .on_mouse_down(MouseButton::Right, move |_, _, cx: &mut App| {
-                if let Some(dir) = std::path::Path::new(&dest_right).parent() {
-                    crate::app::open_in_background(dir.to_path_buf(), cx);
-                }
+                crate::app::open_folder_selecting(
+                    std::path::PathBuf::from(&dest_right),
+                    cx,
+                );
                 cx.stop_propagation();
             })
     };
@@ -646,11 +649,10 @@ fn row(
             .tooltip(t(Key::RowDeleteTip))
             .on_click(move |_, _, cx: &mut App| {
                 weak.update(cx, |this, cx| {
-                    this.svc.apply(Command::Remove {
+                    this.confirm_delete = Some(crate::app::ConfirmDelete {
                         ids: vec![id.clone()],
                         delete_files: false,
                     });
-                    this.selected.remove(&id);
                     cx.notify();
                 })
                 .ok();

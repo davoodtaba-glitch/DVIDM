@@ -1555,14 +1555,8 @@ impl MainView {
         };
         let save_to = snap.dest.to_string_lossy().into_owned();
         let name = snap.name.clone();
-        let open_target = if snap.status == Status::Done {
-            snap.dest.clone()
-        } else {
-            snap.dest
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| snap.dest.clone())
-        };
+        let open_target = snap.dest.clone();
+        let open_is_file = snap.status == Status::Done;
         let mut rows: Vec<(String, String, bool, Hsla)> = vec![
             (t(Key::PropsType), type_label.clone(), false, pal.text),
             (t(Key::PropsStatus), status_label, false, pal.status(snap.status)),
@@ -1688,8 +1682,13 @@ impl MainView {
                                 .label(t(Key::CommonOpen))
                                 .on_click({
                                     let target = open_target.clone();
+                                    let is_file = open_is_file;
                                     move |_, _, cx: &mut App| {
-                                        open_in_background(target.clone(), cx);
+                                        if is_file {
+                                            open_in_background(target.clone(), cx);
+                                        } else {
+                                            open_folder_selecting(target.clone(), cx);
+                                        }
                                     }
                                 }),
                         )
@@ -2032,20 +2031,28 @@ impl MainView {
         .detach();
     }
 
-    /// Check twice a day and raise the in-app toast when a new version appears.
+    /// Check once shortly after startup and then twice a day. A newer version
+    /// raises a fading in-app notice; the desktop card is shown once per version.
     fn start_update_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn_in(window, async move |this, cx| loop {
-            let wait = cx
-                .update(|_, cx| {
-                    this.update(cx, |this, _| update_due_in(this))
-                        .unwrap_or(UPDATE_CHECK_SECS)
-                })
-                .unwrap_or(UPDATE_CHECK_SECS);
-            cx.background_executor()
-                .timer(Duration::from_secs(wait))
-                .await;
+        cx.spawn_in(window, async move |this, cx| {
+            let mut first = true;
+            loop {
+                let wait = if first {
+                    5
+                } else {
+                    cx.update(|_, cx| {
+                        this.update(cx, |this, _| update_due_in(this))
+                            .unwrap_or(UPDATE_CHECK_SECS)
+                    })
+                    .unwrap_or(UPDATE_CHECK_SECS)
+                };
+                cx.background_executor()
+                    .timer(Duration::from_secs(wait))
+                    .await;
+                let startup_check = first;
+                first = false;
 
-            let start = cx
+                let start = cx
                 .update(|_, cx| {
                     this.update(cx, |this, _| {
                         if this.update_checking {
@@ -2081,6 +2088,13 @@ impl MainView {
                     this.update_checking = false;
                     this.svc.apply(Command::SetLastUpdateCheck(now));
                     if let Some((version, url)) = available {
+                        if startup_check {
+                            this.show_notice(
+                                tf(Key::UpdateAvailableTitle, &[version.as_str()]),
+                                false,
+                                cx,
+                            );
+                        }
                         if this.svc.prefs().update_notified != version {
                             this.svc.apply(Command::SetUpdateNotified(version.clone()));
                             this.show_update_toast(version, url, cx);
@@ -2090,6 +2104,7 @@ impl MainView {
                 .ok();
             })
             .ok();
+            }
         })
         .detach();
     }
@@ -3692,6 +3707,29 @@ pub(crate) fn open_in_background(target: std::path::PathBuf, _cx: &mut App) {
             }
         };
         crate::core::log::write(format!("open {target:?} -> {outcome}"));
+    });
+}
+
+/// Open the folder that holds a download and select its file when it exists.
+pub(crate) fn open_folder_selecting(file: std::path::PathBuf, _cx: &mut App) {
+    std::thread::spawn(move || {
+        let outcome = if file.exists() {
+            let arg = format!("/select,{}", file.to_string_lossy());
+            match std::process::Command::new("explorer.exe").arg(arg).spawn() {
+                Ok(_) => "ok".to_string(),
+                Err(e) => format!("failed: {e}"),
+            }
+        } else {
+            let dir = file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| file.clone());
+            match std::process::Command::new("explorer.exe").arg(&dir).spawn() {
+                Ok(_) => "ok".to_string(),
+                Err(e) => format!("failed: {e}"),
+            }
+        };
+        crate::core::log::write(format!("open folder {file:?} -> {outcome}"));
     });
 }
 
