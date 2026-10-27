@@ -41,9 +41,9 @@ The package includes a **Chrome / Edge extension** that sends links and pages st
 | **Download lists** | Colored lists, per-list parallelism, scheduled sessions with a start countdown and session length, and optional shutdown when a list window closes. |
 | **Queue control** | Start, pause and re-order downloads; hold new downloads with *Don't start immediately*. |
 | **Speed limit** | Global bandwidth cap from 0 to 1 GB/s. |
-| **Browser integration** | Send links and pages from Chrome or Edge. Choose the shortcut key in Settings — Ctrl, Alt, Shift, Insert or a combination — then hold it and click a file link. Extensionless and authenticated links are resolved through Chrome first so DVIDM receives the final URL and server filename. |
-| **Persian & RTL** | Interface language selector (System, English, فارسی, العربية). Persian and Arabic mirror the whole interface right-to-left, with Persian wording, bidi-safe numbers and grapheme-safe text editing. |
-| **Proxy** | No proxy, Windows system proxy, or manual HTTP / SOCKS5 with optional credentials. The Windows proxy is re-read while the app runs. |
+| **Browser integration** | Send links and pages from Chrome or Edge. Choose the shortcut key in Settings — Ctrl, Alt, Shift, Insert or a combination — then hold it and click a file link. Links that need your browser session work too, and the saved file keeps its real name. |
+| **Persian & RTL** | Interface language selector (System, English, فارسی, العربية). Persian and Arabic flip the whole interface right-to-left, with Persian wording, readable numbers and normal text editing. |
+| **Proxy** | No proxy, Windows system proxy, or manual HTTP / SOCKS5 with optional credentials. Windows proxy changes are picked up automatically. |
 | **Smart organization** | Categories, search, sortable columns and a **Last date** column showing the last start time with full date/time on hover. |
 | **Update check** | Checks GitHub from the logo menu and every two days in the background. **Download installer** adds the MSI to DVIDM's own downloads. |
 | **Ready-to-use defaults** | Saves to your Windows **Downloads** folder, partial files in `%TEMP%\DVIDM`, and starts with Windows on first launch. |

@@ -2,13 +2,13 @@
 
 ## 0.5.65
 
-- **Persian / RTL interface:** language selector under **Settings → Appearance** (System, English, فارسی, العربية). Persian and Arabic mirror the sidebar, toolbar, table, dialogs and notices right-to-left; System follows the Windows UI language. Adds a Persian string catalogue, bidi-isolated numbers, grapheme-safe delete/rename and RTL-aware truncation.
-- **Proxy support:** No proxy, Windows system proxy, and manual **HTTP or SOCKS5** with optional credentials. Authenticated HTTPS proxying works through CONNECT; the Windows proxy is re-read while the app runs. Manual address entry accepts `host:port` and full `socks5://` URLs.
-- **Chrome / Edge extension 0.5.11:** Configurable shortcut key presets (Ctrl, Alt, Shift, Insert, Ctrl+Alt, Ctrl+Shift, Alt+Shift, Ctrl or Alt). The file-type list accepts up to 32 characters (including `.safetensors`). Extensionless and authenticated downloads are resolved through Chrome so DVIDM receives the final CDN URL and server filename; a fallback sends the original link if Chrome never starts, and Chrome keeps the file if DVIDM is offline.
-- **Download engine:** More stable throughput with larger reads, a shared pooled connection agent, bounded range requests and no per-part fsync. Speed now shows two decimals and is smoothed over a longer window. Temp part files are isolated by destination and stale parts are cleared, preventing different downloads with the same filename from resuming each other's bytes.
-- **Interface polish:** Three-letter file badges (SAF for `.safetensors`), extra spacing between Progress and Speed, and modal windows now block clicks to the download list behind them.
-- Downloads are stored under the download list and category folders.
-- Rebuilt installer and portable package, including the `locale` files and extension 0.5.11.
+- **Persian and right-to-left support:** choose System, English, فارسی or العربية under **Settings → Appearance**. Persian and Arabic flip the whole interface right-to-left, with Persian wording, readable numbers, and normal text editing.
+- **Proxy support:** connect through the Windows proxy, or enter an HTTP or SOCKS5 proxy with an optional username and password.
+- **Better browser downloads (extension 0.5.11):** pick your own shortcut key, add more file types (including `.safetensors`), and download from sites that need an active browser session. If the browser cannot start the download, the link is still sent to DVIDM; if DVIDM is closed, Chrome keeps the file.
+- **Smoother downloads:** the download engine has been reworked for steadier speeds, a clearer two-decimal speed display, and fewer interruptions. New downloads no longer inherit partial data from another file with the same name.
+- **Interface polish:** short three-letter file badges, more space between Progress and Speed, and windows that block clicks to the list behind them.
+- Downloads are saved into folders named after the download list and category.
+- Rebuilt installer and portable package, including language files and extension 0.5.11.
 
 ## 0.5.35
 
