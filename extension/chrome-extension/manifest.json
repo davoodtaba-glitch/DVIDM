@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DVIDM Link Helper",
-  "version": "0.5.11",
+  "version": "0.5.16",
   "description": "Send links and pages to DV Internet Download Manager. Hold Ctrl, Alt, Shift or Insert and click a file to download it.",
   "permissions": [
     "contextMenus",

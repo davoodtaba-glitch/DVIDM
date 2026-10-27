@@ -1,6 +1,7 @@
 const API = "http://127.0.0.1:52137";
 const sendButton = document.getElementById("send");
 const copyButton = document.getElementById("copy");
+const selectionMenuToggle = document.getElementById("selection-menu");
 const statusEl = document.getElementById("status");
 const SEND_LABEL = "Send selected links on page";
 const COPY_LABEL = "Copy selected links";
@@ -98,6 +99,19 @@ function collectSelectedLinks(callback) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   setStatus(await ping());
+  chrome.storage.local.get({ dvidmSelectionMenu: true }, (data) => {
+    selectionMenuToggle.checked = data.dvidmSelectionMenu !== false;
+  });
+});
+
+selectionMenuToggle.addEventListener("change", () => {
+  chrome.storage.local.set({ dvidmSelectionMenu: selectionMenuToggle.checked });
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.dvidmSelectionMenu) {
+    selectionMenuToggle.checked = changes.dvidmSelectionMenu.newValue !== false;
+  }
 });
 
 sendButton.addEventListener("click", () => {

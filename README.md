@@ -41,7 +41,7 @@ The package includes a **Chrome / Edge extension** that sends links and pages st
 | **Download lists** | Colored lists, per-list parallelism, scheduled sessions with a start countdown and session length, and optional shutdown when a list window closes. |
 | **Queue control** | Start, pause and re-order downloads; hold new downloads with *Don't start immediately*. |
 | **Speed limit** | Global bandwidth cap from 0 to 1 GB/s. |
-| **Browser integration** | Send links and pages from Chrome or Edge. Choose the shortcut key in Settings — Ctrl, Alt, Shift, Insert or a combination — then hold it and click a file link. Links that need your browser session work too, and the saved file keeps its real name. |
+| **Browser integration** | Send links and pages from Chrome or Edge. Choose the shortcut key in Settings — Ctrl, Alt, Shift, Insert or a combination — then hold it and click a file link. Selecting text also opens a compact DVIDM quick menu near the pointer. Links that need your browser session work too, and the saved file keeps its real name. |
 | **Persian & RTL** | Interface language selector (System, English, فارسی, العربية). Persian and Arabic flip the whole interface right-to-left, with Persian wording, readable numbers and normal text editing. |
 | **Proxy** | No proxy, Windows system proxy, or manual HTTP / SOCKS5 with optional credentials. Windows proxy changes are picked up automatically. |
 | **Smart organization** | Categories, search, sortable columns and a **Last date** column showing the last start time with full date/time on hover. |
@@ -90,7 +90,7 @@ The extension talks to the running app over a local connection (`127.0.0.1:52137
    %LOCALAPPDATA%\Programs\DVIDM\chrome-extension
    ```
 5. Pin the extension to the toolbar. Select links on a page and choose **Send selected links**, or use the right-click menu. Copied links can also be sent from DVIDM's **Clipboard** button.
-6. Choose the shortcut key in **Settings → Browser shortcut**, then hold it and click a file link to send it straight to DVIDM. Normal page links are untouched. The file-type list is configurable in the same card (`.safetensors` and types up to 32 characters are supported).
+6. Choose the shortcut key in **Settings → Browser shortcut**, then hold it and click a file link to send it straight to DVIDM. Normal page links are untouched. The file-type list is configurable in the same card (`.safetensors` and types up to 32 characters are supported). Selecting text opens a quick DVIDM menu near the pointer; use its checkbox to turn that menu off.
 
 Portable build: choose the `chrome-extension` folder next to `DVIDM.exe` when loading the extension. After copying updated extension files, press **Reload** on the extension card.
 

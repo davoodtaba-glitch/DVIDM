@@ -12,13 +12,18 @@ Sends links and pages to **DV Internet Download Manager** over a localhost-only 
 
 ## Usage
 
-- **The configured shortcut (Ctrl, Alt, or Ctrl/Alt) a file link** (common download extensions such as
+- **The configured shortcut key** (Ctrl, Alt, Shift, Insert, or a combination) on a file link (common download extensions such as
   `.zip`, `.rar`, `.exe`, `.msi`, `.iso`, `.pdf`, `.mp4`, or any link with a
-  `download` attribute) to add it to DVIDM and start downloading immediately.
-  Normal page links are left alone, so Ctrl+click still opens a new tab.
-  Ctrl+Shift+click keeps Chrome's native behavior. The captured file types are
-  configurable in DVIDM under **Settings → Browser shortcut**; the app's
-  defaults cover common large-file formats.
+  `download` attribute) adds it to DVIDM and starts downloading immediately.
+  Normal page links are left alone, so the shortcut does not hijack ordinary
+  navigation. The captured file types are configurable in DVIDM under
+  **Settings → Browser shortcut**; the app's defaults cover common large-file
+  formats.
+- **Select text/links on a page** and a small DVIDM menu appears next to the
+  pointer with the same actions as the right-click menu: send the selected
+  links, copy them, download the link under the selection, or send the page.
+  Uncheck **Show on text selection** at the bottom of the menu to turn it off;
+  the same switch is in the extension toolbar popup.
 - **Right-click a link** → “Download link with DVIDM”.
 - **Select text/links on a page**, right-click → “Send selected links to DVIDM”.
   All links inside the selection (anchors and plain URLs) are collected.
@@ -34,7 +39,7 @@ Sends links and pages to **DV Internet Download Manager** over a localhost-only 
 **Links sent from menus and the popup are not added directly.** DVIDM opens the
 same review window used by “Get from clipboard” (titled **From Chrome**), where
 you can uncheck items, pick a destination list and press **Add**. Only the
-configured shortcut shortcut uses the direct path.
+configured shortcut key uses the direct path.
 
 ## How it works
 

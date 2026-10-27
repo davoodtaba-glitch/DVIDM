@@ -58,16 +58,7 @@ chrome.contextMenus.onClicked.addListener((info) => {
     return;
   }
   if (info.menuItemId === "dvidm-link" && info.linkUrl) {
-    // Feed the link through Chrome's download engine first: that resolves the
-    // login redirect and gives the real CDN URL, which a plain /add cannot.
-    armTakeover(info.linkUrl, false);
-    startMenuFallback(info.linkUrl);
-    chrome.downloads.download({ url: info.linkUrl }, () => {
-      if (!chrome.runtime.lastError) return;
-      cancelMenuFallback();
-      resetArm();
-      sendToDvidm([info.linkUrl]);
-    });
+    beginLinkDownload(info.linkUrl);
     return;
   }
   const url = info.linkUrl || info.pageUrl;
@@ -122,6 +113,21 @@ function resetArm() {
   armedDirect = true;
 }
 
+/// Resolve an explicit link through Chrome's download engine, then hand the
+/// final URL and filename to DVIDM. Shared by the right-click menu and the
+/// selection popup.
+function beginLinkDownload(url) {
+  if (!/^https?:\/\//i.test(url)) return;
+  armTakeover(url, false);
+  startMenuFallback(url);
+  chrome.downloads.download({ url }, () => {
+    if (!chrome.runtime.lastError) return;
+    cancelMenuFallback();
+    resetArm();
+    sendToDvidm([url]);
+  });
+}
+
 function sameTarget(a, b) {
   try {
     const ua = new URL(a);
@@ -137,6 +143,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === "dvidm-config") {
     loadConfig().then((c) => sendResponse({ formats: c.formats, modifier: c.modifier }));
     return true;
+  }
+  if (message && message.type === "dvidm-send-urls" && Array.isArray(message.urls)) {
+    const urls = [...new Set(
+      message.urls.filter((url) => typeof url === "string" && /^https?:\/\//i.test(url))
+    )];
+    if (!urls.length) {
+      sendResponse({ ok: false, count: 0 });
+      return false;
+    }
+    sendToDvidm(urls, message.direct === true).then((ok) =>
+      sendResponse({ ok, count: urls.length })
+    );
+    return true;
+  }
+  if (message && message.type === "dvidm-copy-urls" && Array.isArray(message.urls)) {
+    const urls = [...new Set(
+      message.urls.filter((url) => typeof url === "string" && /^https?:\/\//i.test(url))
+    )];
+    if (!urls.length) {
+      sendResponse({ ok: false, count: 0 });
+      return false;
+    }
+    copyToClipboard(urls.join("\n")).then((ok) => {
+      showBadge(ok ? String(urls.length) : "!", ok ? "#3b82f6" : "#ef4444");
+      sendResponse({ ok, count: urls.length });
+    });
+    return true;
+  }
+  if (message && message.type === "dvidm-download-link" && typeof message.url === "string") {
+    beginLinkDownload(message.url);
+    sendResponse({ ok: true });
+    return false;
   }
   if (message && message.type === "dvidm-arm") {
     armTakeover(typeof message.href === "string" ? message.href : "", true);
