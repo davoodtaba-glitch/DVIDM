@@ -766,6 +766,7 @@ impl MainView {
         let queued = self.svc.prefs().queued;
         let has_selection = !self.selected.is_empty();
         let can_move = has_selection && self.sort.is_none();
+        let active_here = self.list_active();
         // Bulk buttons act on the selection when there is one, otherwise on
         // everything in the current view.
         let move_color = if can_move {
@@ -889,28 +890,52 @@ impl MainView {
             .items_center()
             .gap(px(8.))
             .child(
-                Button::new("start")
-                    .custom(action_style)
-                    .icon(Icon::new(IconName::Play).text_color(pal.ok))
-                    .label(if has_selection {
-                        t(Key::ToolbarStart).to_string()
-                    } else {
-                        t(Key::ToolbarStartList).to_string()
-                    })
-                    .tooltip(if has_selection {
-                        t(Key::ToolbarStartSelectedTip)
-                    } else {
-                        t(Key::ToolbarStartAllTip)
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let ids = this.action_ids();
-                        if ids.is_empty() {
-                            this.svc.apply(Command::ResumeAll);
-                        } else {
-                            this.svc.apply(Command::Resume(ids));
-                        }
-                        cx.notify();
-                    })),
+                div()
+                    .relative()
+                    .child(
+                        Button::new("start")
+                            .custom(action_style)
+                            .icon(Icon::new(IconName::Play).text_color(pal.ok))
+                            .label(if has_selection {
+                                t(Key::ToolbarStart).to_string()
+                            } else {
+                                t(Key::ToolbarStartList).to_string()
+                            })
+                            .tooltip(if has_selection {
+                                t(Key::ToolbarStartSelectedTip)
+                            } else {
+                                t(Key::ToolbarStartAllTip)
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let ids = this.action_ids();
+                                if ids.is_empty() {
+                                    this.svc.apply(Command::ResumeAll);
+                                } else {
+                                    this.svc.apply(Command::Resume(ids));
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .when(active_here, |wrapper| {
+                        wrapper.child(
+                            div()
+                                .absolute()
+                                .top(px(4.))
+                                .when(crate::rtl::on(), |dot| dot.left(px(7.)))
+                                .when(!crate::rtl::on(), |dot| dot.right(px(7.)))
+                                .size(px(6.))
+                                .rounded_full()
+                                .bg(pal.ok)
+                                .with_animation(
+                                    "start-list-active",
+                                    Animation::new(Duration::from_millis(900)).repeat(),
+                                    |dot, value| {
+                                        let wave = 1.0 - (2.0 * value - 1.0).abs();
+                                        dot.opacity(0.3 + 0.7 * wave)
+                                    },
+                                ),
+                        )
+                    }),
             )
             .child(
                 Button::new("pause")
@@ -1457,6 +1482,23 @@ impl MainView {
         } else {
             self.selected.iter().cloned().collect()
         }
+    }
+
+    /// Whether the selected list (or the whole view) has an active transfer.
+    fn list_active(&self) -> bool {
+        let ids: Option<HashSet<&str>> = self.list_filter.as_ref().and_then(|name| {
+            self.svc
+                .lists()
+                .iter()
+                .find(|list| &list.name == name)
+                .map(|list| list.items.iter().map(String::as_str).collect())
+        });
+        self.svc.view().snaps.iter().any(|snap| {
+            matches!(snap.status, Status::Connecting | Status::Downloading)
+                && ids
+                    .as_ref()
+                    .map_or(true, |ids| ids.contains(snap.id.as_str()))
+        })
     }
 
     /// Right-click properties for one download, shaped like the classic

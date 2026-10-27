@@ -164,8 +164,11 @@ pub(crate) fn sidebar(
         let selected = page == Page::Downloads && active_list.as_deref() == Some(name.as_str());
         let weak_click = weak.clone();
         let weak_delete = weak.clone();
+        let weak_state = weak.clone();
         let name_click = name.clone();
         let name_delete = name.clone();
+        let state_ids: Vec<String> = list.items.clone();
+        let can_toggle = any_unfinished;
         let is_default = list.is_default;
         lists = lists.child(
             div()
@@ -233,8 +236,7 @@ pub(crate) fn sidebar(
                         .text_color(if selected { pal.text } else { pal.muted })
                         .child(display_fa_ui(&name)),
                 )
-                // Play while any member is transferring; otherwise pause, even
-                // for an empty or fully completed list.
+                // Small play/pause control for the whole list.
                 .child(
                     div()
                         .w(px(20.))
@@ -248,20 +250,37 @@ pub(crate) fn sidebar(
                                 .compact()
                                 .icon(
                                     Icon::new(if has_active {
-                                        CatIcon::Play
-                                    } else {
                                         CatIcon::Pause
+                                    } else {
+                                        CatIcon::Play
                                     })
                                     .size(px(11.))
                                     .text_color(if has_active {
-                                        pal.ok
-                                    } else if all_paused {
                                         pal.warn
+                                    } else if any_unfinished {
+                                        pal.ok
                                     } else {
-                                        with_alpha(pal.muted, 0.45)
+                                        with_alpha(pal.muted, 0.32)
                                     }),
                                 )
-                                .tooltip(state_tip),
+                                .tooltip(state_tip)
+                                .when(can_toggle, |button| {
+                                    button.on_click(move |_, _, cx: &mut App| {
+                                        let ids = state_ids.clone();
+                                        let pause = has_active;
+                                        weak_state
+                                            .update(cx, |this, cx| {
+                                                if pause {
+                                                    this.svc.apply(Command::Pause(ids));
+                                                } else {
+                                                    this.svc.apply(Command::Resume(ids));
+                                                }
+                                                cx.notify();
+                                            })
+                                            .ok();
+                                        cx.stop_propagation();
+                                    })
+                                }),
                         ),
                 )
                 // The clock is always there; dim until a schedule is set.

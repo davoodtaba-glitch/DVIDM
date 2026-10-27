@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.66
+
+- **List controls:** every download list in the sidebar now has a small play/pause button. Start or pause the whole list without opening it.
+- **Downloading indicator:** while the current list is downloading, the **Start list** button shows a small pulsing dot.
+- Rebuilt installer and portable package with extension 0.5.16.
+
 ## 0.5.65
 
 - **Persian and right-to-left support:** choose System, English, فارسی or العربية under **Settings → Appearance**. Persian and Arabic flip the whole interface right-to-left, with Persian wording, readable numbers, and normal text editing.
