@@ -11,6 +11,72 @@ pub(crate) fn rgb(hex: u32) -> Hsla {
     Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: b as f32 / 255.0, a: 1.0 }.into()
 }
 
+/// Parse `#rrggbb` (or `rrggbb`) into a colour.
+pub(crate) fn parse_color_hex(hex: &str) -> Option<Hsla> {
+    let s = hex.trim().trim_start_matches('#');
+    if s.len() != 6 {
+        return None;
+    }
+    let value = u32::from_str_radix(s, 16).ok()?;
+    Some(rgb(value))
+}
+
+/// Hue (0..1), saturation and brightness of a colour, for the picker.
+pub(crate) fn color_to_hsv(color: Hsla) -> (f32, f32, f32) {
+    let rgba: Rgba = color.into();
+    rgb_to_hsv(rgba.r, rgba.g, rgba.b)
+}
+
+fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let value = max;
+    let saturation = if max <= 0.0 { 0.0 } else { delta / max };
+    let hue = if delta <= 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / delta).rem_euclid(6.0) / 6.0
+    } else if max == g {
+        (((b - r) / delta) + 2.0) / 6.0
+    } else {
+        (((r - g) / delta) + 4.0) / 6.0
+    };
+    (hue.clamp(0.0, 1.0), saturation.clamp(0.0, 1.0), value)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let h = h.rem_euclid(1.0) * 6.0;
+    let sector = h.floor();
+    let f = h - sector;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match (sector as i32).rem_euclid(6) {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
+}
+
+pub(crate) fn hsv_color(h: f32, s: f32, v: f32) -> Hsla {
+    let (r, g, b) = hsv_to_rgb(h, s, v);
+    Rgba { r, g, b, a: 1.0 }.into()
+}
+
+pub(crate) fn hsv_hex(h: f32, s: f32, v: f32) -> String {
+    let (r, g, b) = hsv_to_rgb(h, s, v);
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (r * 255.0).round() as u8,
+        (g * 255.0).round() as u8,
+        (b * 255.0).round() as u8
+    )
+}
+
 /// Same hex with a different alpha, for tints and subtle fills.
 pub(crate) fn alpha(hex: u32, a: f32) -> Hsla {
     let r = ((hex >> 16) & 0xff) as u8;
@@ -113,6 +179,14 @@ impl Palette {
 
     pub(crate) fn list_color(&self, i: u8) -> Hsla {
         self.list_colors[(i as usize) % self.list_colors.len()]
+    }
+
+    /// A list's label colour: its custom hex when set, otherwise the palette.
+    pub(crate) fn list_color_of(&self, list: &crate::core::prefs::DownloadList) -> Hsla {
+        list.color_hex
+            .as_deref()
+            .and_then(parse_color_hex)
+            .unwrap_or_else(|| self.list_color(list.color))
     }
 
     pub(crate) fn status(&self, status: crate::engine::Status) -> Hsla {

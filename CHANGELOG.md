@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.77
+
+- **Custom list colours:** pick a palette colour or choose any shade with the new colour picker.
+- **Your table:** show or hide columns, drag the dividers to resize them, and keep the layout.
+- **Per-download folder:** change the save folder of one download from Properties; partial data moves with it.
+- **Faster selection:** click a card to select it, drag across cards, and click empty space to clear. Right-click clears the selection first, then opens Properties.
+- **Quick appearance:** switch light/dark and the interface language from the main window.
+- Fixed the small square that could stay around list controls.
+- Rebuilt installer and portable package.
+
 ## 0.5.71
 
 - **A cleaner Settings window:** options are grouped into General, Downloads, and Browser & network, and arranged in two columns so the page uses the available space.

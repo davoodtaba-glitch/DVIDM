@@ -65,6 +65,23 @@ pub(crate) enum Command {
         name: String,
         color: u8,
     },
+    /// Custom label colour for a list (#rrggbb); `None` returns to the palette.
+    SetListColorHex {
+        name: String,
+        hex: Option<String>,
+    },
+    /// Persisted width of one download-table column.
+    SetColumnWidth {
+        key: String,
+        width: u32,
+    },
+    /// Show or hide one optional download-table column.
+    SetColumnHidden {
+        key: String,
+        hidden: bool,
+    },
+    /// Drop every custom column width and show all columns again.
+    ResetColumns,
     /// Interface font family, persisted for the next run.
     SetFont(String),
     /// Navigation sidebar width in logical pixels, persisted for the next run.

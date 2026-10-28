@@ -17,6 +17,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::FocusableExt as _;
 use gpui_kit::component::StyledExt as _;
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
@@ -73,6 +74,17 @@ impl SortCol {
             _ => None,
         }
     }
+}
+
+/// Active drag on a table header grip.
+#[derive(Clone)]
+pub(crate) struct ColResize {
+    pub(crate) key: String,
+    pub(crate) start_x: f32,
+    pub(crate) start_w: f32,
+    pub(crate) current: u32,
+    pub(crate) min: u32,
+    pub(crate) max: u32,
 }
 
 pub(crate) struct Notice {
@@ -141,6 +153,8 @@ pub(crate) struct MainView {
     pub(crate) sidebar_width: f32,
     /// True while the splitter between the sidebar and the content is dragged.
     pub(crate) resizing_sidebar: bool,
+    /// Column being resized by dragging its header grip.
+    pub(crate) col_resize: Option<ColResize>,
     pub(crate) sort: Option<(SortCol, bool)>,
     pub(crate) url: Entity<InputState>,
     pub(crate) search: Entity<InputState>,
@@ -182,12 +196,21 @@ pub(crate) struct MainView {
     pub(crate) toast_window: Option<AnyWindowHandle>,
     /// Logo menu (user guide, about, update, exit) is open.
     pub(crate) logo_menu: bool,
+    /// Quick language menu on the downloads toolbar.
+    pub(crate) lang_menu: bool,
     /// A manual or background update request is in flight.
     pub(crate) update_checking: bool,
     /// Parallel-download cap being edited in the list options dialog.
     pub(crate) list_opts_cap: u32,
-    /// Label colour being edited in the list options dialog.
-    pub(crate) list_opts_color: u8,
+    /// Label colour index being edited in a list dialog.
+    pub(crate) list_color_choice: u8,
+    /// Custom label colour being edited; overrides the palette index.
+    pub(crate) list_color_hex: Option<String>,
+    /// Whether the inline custom colour picker is expanded.
+    pub(crate) list_color_picker: bool,
+    pub(crate) picker_hue: f32,
+    pub(crate) picker_sat: f32,
+    pub(crate) picker_val: f32,
     /// Shutdown-at-end switch being edited in the list options dialog.
     pub(crate) list_opts_shutdown: bool,
     /// Whether the time window is enabled in the list options dialog.
@@ -207,6 +230,8 @@ pub(crate) struct MainView {
     pub(crate) visible: bool,
     /// URL batches posted by the Chrome extension.
     pub(crate) remote_rx: std::sync::mpsc::Receiver<crate::core::server::RemoteBatch>,
+    /// Requests to pick a new folder for one download.
+    pub(crate) folder_tx: std::sync::mpsc::Sender<(String, Option<std::path::PathBuf>)>,
     /// Interface language already applied to the RTL flag.
     ui_lang_seen: String,
 }
@@ -260,6 +285,7 @@ impl MainView {
         let tray = Tray::install(quitting.clone());
 
         let (remote_tx, remote_rx) = std::sync::mpsc::channel();
+        let (folder_tx, folder_rx) = std::sync::mpsc::channel();
         let wake_slot = hwnd.clone();
         crate::core::server::start(
             remote_tx,
@@ -293,6 +319,7 @@ impl MainView {
             log_window: None,
             sidebar_width,
             resizing_sidebar: false,
+            col_resize: None,
             sort,
             url,
             search,
@@ -320,9 +347,15 @@ impl MainView {
             pending_focus: None,
             toast_window: None,
             logo_menu: false,
+            lang_menu: false,
             update_checking: false,
             list_opts_cap: 0,
-            list_opts_color: 0,
+            list_color_choice: 0,
+            list_color_hex: None,
+            list_color_picker: false,
+            picker_hue: 0.0,
+            picker_sat: 1.0,
+            picker_val: 1.0,
             list_opts_shutdown: false,
             list_opts_sched: false,
             clock_subs: Vec::new(),
@@ -333,9 +366,11 @@ impl MainView {
             shutdown_at: None,
             visible: true,
             remote_rx,
+            folder_tx,
         };
 
         view.watch_inputs(window, cx);
+        view.start_folder_loop(folder_rx, cx);
         view.start_tick_loop(cx);
         view.start_update_loop(window, cx);
         view.start_tray_loop(cx);
@@ -395,6 +430,54 @@ impl MainView {
                     let raw = this.props_url.read(cx).value().trim().to_string();
                     this.apply_props_url(&id, raw, window, cx);
                 }
+            }
+        })
+        .detach();
+    }
+
+    /// Native folder picker for one download, kept off the UI thread. The
+    /// properties dialog only posts a request here; the result is applied
+    /// through the service once the dialog has closed.
+    fn start_folder_loop(
+        &mut self,
+        rx: std::sync::mpsc::Receiver<(String, Option<std::path::PathBuf>)>,
+        cx: &mut Context<Self>,
+    ) {
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        cx.spawn(async move |this, cx| loop {
+            let rx_recv = rx.clone();
+            let Ok((id, start)) =
+                smol::unblock(move || rx_recv.lock().unwrap().recv()).await
+            else {
+                break;
+            };
+            let picked = smol::unblock(move || {
+                let mut dialog = rfd::FileDialog::new();
+                if let Some(dir) = start {
+                    dialog = dialog.set_directory(dir);
+                }
+                dialog.pick_folder()
+            })
+            .await;
+            let Some(dir) = picked else { continue };
+            let alive = this
+                .update(cx, |this, cx| {
+                    match this.svc.set_dest(&id, dir) {
+                        Ok(()) => {
+                            this.show_notice(t(Key::PropsFolderChanged).to_string(), false, cx);
+                            if let Some(handle) = this.window_handle {
+                                handle
+                                    .update(cx, |_view, window, cx| window.close_dialog(cx))
+                                    .ok();
+                            }
+                        }
+                        Err(e) => this.show_notice(i18n::error(&e), true, cx),
+                    }
+                    cx.notify();
+                })
+                .is_ok();
+            if !alive {
+                break;
             }
         })
         .detach();
@@ -1051,33 +1134,109 @@ impl MainView {
                             .child(actions)
                             .child(
                                 div()
-                                    .id("search-box")
                                     .flex()
                                     .flex_row()
                                     .mirror()
                                     .items_center()
-                                    .gap(px(6.))
-                                    .w(px(230.))
-                                    .px(px(9.))
-                                    .py(px(2.))
-                                    .rounded(px(8.))
-                                    .bg(pal.bg)
-                                    .border_1()
-                                    .border_color(pal.line)
-                                    .hover(|s| {
-                                        s.bg(pal.card)
-                                            .border_color(with_alpha(pal.accent, 0.5))
-                                    })
+                                    .gap(px(8.))
                                     .child(
-                                        Icon::new(IconName::Search)
-                                            .size(px(14.))
-                                            .text_color(pal.muted),
+                                        div()
+                                            .id("search-box")
+                                            .flex()
+                                            .flex_row()
+                                            .mirror()
+                                            .items_center()
+                                            .gap(px(6.))
+                                            .w(px(230.))
+                                            .px(px(9.))
+                                            .py(px(2.))
+                                            .rounded(px(8.))
+                                            .bg(pal.bg)
+                                            .border_1()
+                                            .border_color(pal.line)
+                                            .hover(|s| {
+                                                s.bg(pal.card)
+                                                    .border_color(with_alpha(pal.accent, 0.5))
+                                            })
+                                            .child(
+                                                Icon::new(IconName::Search)
+                                                    .size(px(14.))
+                                                    .text_color(pal.muted),
+                                            )
+                                            .child(
+                                                Input::new(&self.search)
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .appearance(false),
+                                            ),
                                     )
                                     .child(
-                                        Input::new(&self.search)
-                                            .flex_1()
-                                            .min_w_0()
-                                            .appearance(false),
+                                        Button::new("columns")
+                                            .outline()
+                                            .compact()
+                                            .icon(IconName::LayoutDashboard)
+                                            .tooltip(t(Key::ColumnsTip))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.columns_dialog(window, cx);
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .mirror()
+                                            .items_center()
+                                            .gap(px(1.))
+                                            .h(px(30.))
+                                            .px(px(3.))
+                                            .rounded(px(8.))
+                                            .bg(pal.bg)
+                                            .border_1()
+                                            .border_color(pal.line)
+                                            .child(
+                                                Button::new("quick-theme")
+                                                    .custom(
+                                                        ButtonCustomVariant::new(cx)
+                                                            .hover(with_alpha(pal.muted, 0.12))
+                                                            .active(with_alpha(pal.muted, 0.2)),
+                                                    )
+                                                    .compact()
+                                                    .focus_ring(false)
+                                                    .icon(
+                                                        Icon::new(if pal.dark {
+                                                            IconName::Sun
+                                                        } else {
+                                                            IconName::Moon
+                                                        })
+                                                        .size(px(15.))
+                                                        .text_color(pal.muted),
+                                                    )
+                                                    .tooltip(t(Key::QuickThemeTip))
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        let dark = this.pal.dark;
+                                                        this.set_theme(!dark, cx);
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("quick-lang")
+                                                    .custom(
+                                                        ButtonCustomVariant::new(cx)
+                                                            .hover(with_alpha(pal.muted, 0.12))
+                                                            .active(with_alpha(pal.muted, 0.2)),
+                                                    )
+                                                    .compact()
+                                                    .focus_ring(false)
+                                                    .icon(
+                                                        Icon::new(IconName::Globe)
+                                                            .size(px(15.))
+                                                            .text_color(pal.muted),
+                                                    )
+                                                    .tooltip(t(Key::QuickLangTip))
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.lang_menu = !this.lang_menu;
+                                                        cx.notify();
+                                                    })),
+                                            ),
                                     ),
                             ),
                     ),
@@ -1163,6 +1322,139 @@ impl MainView {
         let width = self.sidebar_width.round() as u32;
         self.svc.apply(Command::SetSidebarWidth(width));
         cx.notify();
+    }
+
+    /// Drag a table header grip. A full-window overlay keeps the drag alive
+    /// when the pointer leaves the header.
+    fn column_resize_overlay(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let weak_move = cx.entity().downgrade();
+        let weak_up = cx.entity().downgrade();
+        div()
+            .id("col-resize-capture")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .occlude()
+            .cursor_col_resize()
+            .on_mouse_move(move |event, _, cx: &mut App| {
+                let x = event.position.x.as_f32();
+                let still_down = event.pressed_button == Some(MouseButton::Left);
+                weak_move
+                    .update(cx, |this, cx| {
+                        if !still_down {
+                            this.finish_column_resize(cx);
+                            return;
+                        }
+                        if let Some(resize) = this.col_resize.as_mut() {
+                            let delta = x - resize.start_x;
+                            let delta = if crate::rtl::on() { -delta } else { delta };
+                            let width = (resize.start_w + delta)
+                                .clamp(resize.min as f32, resize.max as f32);
+                            resize.current = width.round() as u32;
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            })
+            .on_mouse_up(MouseButton::Left, move |_, _, cx: &mut App| {
+                weak_up
+                    .update(cx, |this, cx| this.finish_column_resize(cx))
+                    .ok();
+            })
+            .into_any_element()
+    }
+
+    fn finish_column_resize(&mut self, cx: &mut Context<Self>) {
+        let Some(resize) = self.col_resize.take() else {
+            return;
+        };
+        self.svc.apply(Command::SetColumnWidth {
+            key: resize.key,
+            width: resize.current,
+        });
+        cx.notify();
+    }
+
+    /// Column visibility and reset dialog for the download table.
+    fn columns_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pal = self.pal;
+        let weak = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let hidden = weak
+                .read_with(cx, |this, _| this.svc.prefs().column_hidden.clone())
+                .unwrap_or_default();
+            let mut options = div().flex().flex_col().gap(px(8.)).w_full();
+            for key in crate::downloads::COLUMN_KEYS {
+                let shown = !hidden.iter().any(|k| k == key);
+                let weak_toggle = weak.clone();
+                let key = key.to_string();
+                options = options.child(
+                    Checkbox::new(ElementId::Name(format!("column-{key}").into()))
+                        .checked(shown)
+                        .label(t(crate::downloads::column_label(&key)))
+                        .on_click(move |on: &bool, _, cx: &mut App| {
+                            let key = key.clone();
+                            weak_toggle
+                                .update(cx, |this, cx| {
+                                    this.svc.apply(Command::SetColumnHidden {
+                                        key,
+                                        hidden: !*on,
+                                    });
+                                    cx.notify();
+                                })
+                                .ok();
+                        }),
+                );
+            }
+            let weak_reset = weak.clone();
+            dialog
+                .title(t(Key::ColumnsTitle))
+                .width(px(430.))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(pal.muted)
+                                .child(t(Key::ColumnsHint)),
+                        )
+                        .child(options)
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(pal.muted)
+                                .child(t(Key::ColumnsFixedHint)),
+                        ),
+                )
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            Button::new("columns-reset")
+                                .outline()
+                                .label(t(Key::ColumnsReset))
+                                .tooltip(t(Key::ColumnsResetTip))
+                                .on_click(move |_, _, cx: &mut App| {
+                                    weak_reset
+                                        .update(cx, |this, cx| {
+                                            this.svc.apply(Command::ResetColumns);
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                }),
+                        )
+                        .child(
+                            Button::new("columns-ok")
+                                .primary()
+                                .label(t(Key::CommonOk))
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        ),
+                )
+        });
     }
 
     fn status_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -1406,7 +1698,7 @@ impl MainView {
             .svc
             .lists()
             .iter()
-            .map(|l| (l.name.clone(), pal.list_color(l.color)))
+            .map(|l| (l.name.clone(), pal.list_color_of(l)))
             .collect();
         let selection: Vec<String> = self.selected.iter().cloned().collect();
         let weak = cx.entity().downgrade();
@@ -1557,6 +1849,9 @@ impl MainView {
         let name = snap.name.clone();
         let open_target = snap.dest.clone();
         let open_is_file = snap.status == Status::Done;
+        let folder_dest = snap.dest.clone();
+        let folder_enabled = !matches!(snap.status, Status::Connecting | Status::Downloading);
+        let folder_tx = self.folder_tx.clone();
         let mut rows: Vec<(String, String, bool, Hsla)> = vec![
             (t(Key::PropsType), type_label.clone(), false, pal.text),
             (t(Key::PropsStatus), status_label, false, pal.status(snap.status)),
@@ -1659,6 +1954,13 @@ impl MainView {
                     pal,
                 ));
                 if label.as_str() == t(Key::PropsSaveTo).as_str() {
+                    body = body.child(folder_row(
+                        id.clone(),
+                        folder_dest.clone(),
+                        folder_enabled,
+                        folder_tx.clone(),
+                        pal,
+                    ));
                     body = body.child(address_row(
                         url_input.clone(),
                         editable_url,
@@ -1904,6 +2206,85 @@ impl MainView {
                         pal,
                         weak,
                         |this, window, cx| this.confirm_exit(window, cx),
+                    )),
+            )
+            .into_any_element()
+    }
+
+    /// Small language menu under the quick controls on the downloads toolbar.
+    fn lang_menu_overlay(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if !self.lang_menu {
+            return div().into_any_element();
+        }
+        let pal = self.pal;
+        let weak = cx.entity().downgrade();
+        let current = self.svc.prefs().ui_lang.clone();
+        let close = cx.listener(|this, _, _, cx| {
+            this.lang_menu = false;
+            cx.notify();
+        });
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .child(
+                div()
+                    .id("lang-menu-scrim")
+                    .absolute()
+                    .size_full()
+                    .on_click(close),
+            )
+            .child(
+                div()
+                    .id("lang-menu-card")
+                    .absolute()
+                    .edge_end(px(22.))
+                    .top(px(128.))
+                    .w(px(196.))
+                    .rounded(px(10.))
+                    .bg(pal.card)
+                    .border_1()
+                    .border_color(pal.line)
+                    .shadow(vec![
+                        BoxShadow::new(px(0.), px(12.), crate::theme::alpha(0x000000, 0.42))
+                            .blur_radius(px(24.))
+                            .spread_radius(px(-8.)),
+                    ])
+                    .p(px(6.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .on_click(|_, _, cx: &mut App| cx.stop_propagation())
+                    .child(
+                        div()
+                            .px(px(8.))
+                            .pt(px(4.))
+                            .pb(px(6.))
+                            .text_xs()
+                            .text_color(pal.muted)
+                            .child(t(Key::SettingsLanguage)),
+                    )
+                    .child(lang_menu_item(
+                        "system",
+                        t(Key::SettingsLangSystem),
+                        &current,
+                        pal,
+                        weak.clone(),
+                    ))
+                    .child(lang_menu_item(
+                        "en",
+                        t(Key::SettingsLangEnglish),
+                        &current,
+                        pal,
+                        weak.clone(),
+                    ))
+                    .child(lang_menu_item(
+                        "fa",
+                        t(Key::SettingsLangPersian),
+                        &current,
+                        pal,
+                        weak,
                     )),
             )
             .into_any_element()
@@ -2658,7 +3039,7 @@ impl MainView {
             .svc
             .lists()
             .iter()
-            .map(|l| (l.name.clone(), pal.list_color(l.color)))
+            .map(|l| (l.name.clone(), pal.list_color_of(l)))
             .collect();
         let weak = cx.entity().downgrade();
 
@@ -3191,7 +3572,13 @@ impl Render for MainView {
         } else {
             div().into_any_element()
         };
+        let col_resize_overlay = if self.col_resize.is_some() {
+            self.column_resize_overlay(cx)
+        } else {
+            div().into_any_element()
+        };
         let logo_menu = self.logo_menu_overlay(cx);
+        let lang_menu = self.lang_menu_overlay(cx);
         div()
             .relative()
             .size_full()
@@ -3209,6 +3596,8 @@ impl Render for MainView {
                 shutdown_overlay,
                 notice_overlay,
                 resize_overlay,
+                col_resize_overlay,
+                lang_menu,
                 logo_menu,
             ])
     }
@@ -3283,6 +3672,57 @@ fn property_row(
 
 /// Address line in the File Properties window. It is editable only while the
 /// download is paused, because resuming has to pick the new source up.
+/// "Change folder" action under the Save To row.
+fn folder_row(
+    id: String,
+    dest: std::path::PathBuf,
+    enabled: bool,
+    tx: std::sync::mpsc::Sender<(String, Option<std::path::PathBuf>)>,
+    pal: Palette,
+) -> AnyElement {
+    let start = dest.parent().map(|p| p.to_path_buf());
+    div()
+        .w_full()
+        .flex()
+        .flex_row()
+        .mirror()
+        .items_center()
+        .gap(px(10.))
+        .pb(px(6.))
+        .child(div().w(px(104.)).flex_shrink_0())
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .child(
+                    Button::new("props-change-folder")
+                        .outline()
+                        .compact()
+                        .icon(IconName::FolderOpen)
+                        .label(t(Key::PropsChangeFolder))
+                        .disabled(!enabled)
+                        .tooltip(if enabled {
+                            t(Key::PropsChangeFolderTip)
+                        } else {
+                            t(Key::PropsFolderPauseTip)
+                        })
+                        .on_click(move |_, _, _| {
+                            let _ = tx.send((id.clone(), start.clone()));
+                        }),
+                )
+                .when(!enabled, |d| {
+                    d.child(
+                        div()
+                            .text_xs()
+                            .text_color(pal.muted)
+                            .child(t(Key::PropsFolderPauseTip)),
+                    )
+                }),
+        )
+        .into_any_element()
+}
+
 fn address_row(
     input: Entity<InputState>,
     editable: bool,
@@ -3436,6 +3876,53 @@ fn logo_menu_item(
         })
         .child(Icon::new(icon).size(px(15.)).text_color(tone))
         .child(div().text_sm().text_color(pal.text).child(label.to_string()))
+        .into_any_element()
+}
+
+fn lang_menu_item(
+    code: &'static str,
+    label: String,
+    current: &str,
+    pal: Palette,
+    weak: WeakEntity<MainView>,
+) -> AnyElement {
+    let active = current == code;
+    div()
+        .id(ElementId::Name(format!("quick-lang-{code}").into()))
+        .flex()
+        .flex_row()
+        .mirror()
+        .items_center()
+        .gap(px(8.))
+        .h(px(30.))
+        .px(px(8.))
+        .rounded(px(6.))
+        .cursor_pointer()
+        .when(active, |d| d.bg(with_alpha(pal.accent, 0.12)))
+        .hover(|s| s.bg(pal.card_hover))
+        .on_click(move |_, _, cx: &mut App| {
+            weak.update(cx, |this, cx| {
+                this.lang_menu = false;
+                this.svc.apply(Command::SetUiLang(code.into()));
+                let lang = crate::core::prefs::normalize_ui_lang(code);
+                crate::i18n::apply(&lang);
+                this.ui_lang_seen = lang;
+                if let Some(tray) = this.tray.as_ref() {
+                    tray.relabel();
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .child(
+            div()
+                .w(px(14.))
+                .flex_shrink_0()
+                .when(active, |d| {
+                    d.child(Icon::new(IconName::Check).size(px(13.)).text_color(pal.accent))
+                }),
+        )
+        .child(div().text_sm().text_color(pal.text).child(label))
         .into_any_element()
 }
 

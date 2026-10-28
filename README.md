@@ -6,7 +6,7 @@
 
 **Fast, segmented downloads for Windows — with download lists, schedules, speed control and Chrome integration.**
 
-<img src="https://img.shields.io/badge/version-0.5.71-58a6ff?style=for-the-badge" alt="Version 0.5.71" />
+<img src="https://img.shields.io/badge/version-0.5.77-58a6ff?style=for-the-badge" alt="Version 0.5.77" />
 <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=for-the-badge" alt="Windows 10 and 11" />
 <img src="https://img.shields.io/badge/browser-Chrome%20%7C%20Edge-4285F4?style=for-the-badge" alt="Chrome and Edge" />
 <img src="https://img.shields.io/badge/license-Freeware-12ec91?style=for-the-badge" alt="Freeware" />
@@ -14,7 +14,7 @@
 <br />
 
 [**Download DVIDM**](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) &nbsp;·&nbsp;
-[Portable zip](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.71/DVIDM-Portable-0.5.71.zip) &nbsp;·&nbsp;
+[Portable zip](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.77/DVIDM-Portable-0.5.77.zip) &nbsp;·&nbsp;
 [English guide](docs/USER-GUIDE.pdf) &nbsp;·&nbsp;
 [راهنمای فارسی](docs/USER-GUIDE.fa.pdf) &nbsp;·&nbsp;
 [Extension video](docs/install%20extension%20guide.mp4)
@@ -51,6 +51,11 @@ The package includes a **Chrome / Edge extension** that sends links and pages st
 | **Tray and notifications** | Close to tray, single instance, fading desktop completion cards with an option to turn them off. |
 | **Download insights** | File Properties shows active download time and average speed, with paused time excluded. |
 | **Organized settings** | Appearance and language, folders, connections and retries, browser types and network options are grouped into clear cards that use the full window. |
+| **Custom list colours** | Pick a palette colour or open the colour picker and choose any shade for each list. |
+| **Your table** | Show or hide columns, drag the dividers to resize them, and keep the layout between runs. |
+| **One-off folders** | Change the save folder of a single download from Properties; partial data moves with it. |
+| **Quick appearance** | Switch light/dark and the interface language directly from the main window. |
+| **Faster selection** | Click a card to select it, drag across cards, or click empty space to clear. Right-click selects before opening Properties. |
 | **Bilingual help** | Full guides in **English** and **Persian**, plus a video walkthrough for the extension. |
 
 ---
@@ -72,7 +77,7 @@ The package includes a **Chrome / Edge extension** that sends links and pages st
 | File | Description |
 |---|---|
 | [`installer/DVIDM-Setup.msi`](https://github.com/davoodtaba-glitch/DVIDM/releases/latest/download/DVIDM-Setup.msi) | Windows installer (64-bit, no administrator rights required) — also attached to [Releases](https://github.com/davoodtaba-glitch/DVIDM/releases) |
-| [`portable/DVIDM-Portable-0.5.71.zip`](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.71/DVIDM-Portable-0.5.71.zip) | Portable build: extract and run, no installer |
+| [`portable/DVIDM-Portable-0.5.77.zip`](https://github.com/davoodtaba-glitch/DVIDM/releases/download/v0.5.77/DVIDM-Portable-0.5.77.zip) | Portable build: extract and run, no installer |
 | [`extension/chrome-extension/`](extension/chrome-extension) | Unpacked Chrome / Edge extension |
 | [`extension/DVIDM-chrome-extension.zip`](extension/DVIDM-chrome-extension.zip) | Same extension as a zip archive |
 | [`docs/`](docs) | English and Persian guides, and the extension video |
@@ -154,7 +159,7 @@ Use **Settings → Apps → Installed apps → DV Internet Download Manager → 
 
 ## Version
 
-Current release: **0.5.71** — see [CHANGELOG.md](CHANGELOG.md) for user-facing changes.
+Current release: **0.5.77** — see [CHANGELOG.md](CHANGELOG.md) for user-facing changes.
 
 ---
 

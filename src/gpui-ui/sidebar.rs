@@ -9,7 +9,8 @@ use crate::theme::{with_alpha, Palette};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use gpui_kit::component::StyledExt as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::FocusableExt as _;
+use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, WindowExt as _};
@@ -114,7 +115,7 @@ pub(crate) fn sidebar(
             .iter()
             .filter(|id| snaps.iter().any(|s| &s.id == *id))
             .count();
-        let color = pal.list_color(list.color);
+        let color = pal.list_color_of(list);
         let scheduled = list.sched_start.is_some() && list.sched_end.is_some();
         // The indicator describes the queue: completed rows do not count.
         let mut any_unfinished = false;
@@ -246,8 +247,13 @@ pub(crate) fn sidebar(
                         .justify_center()
                         .child(
                             Button::new(ElementId::Name(format!("state-{name}").into()))
-                                .ghost()
+                                .custom(
+                                    ButtonCustomVariant::new(cx)
+                                        .active(with_alpha(pal.muted, 0.12)),
+                                )
                                 .compact()
+                                .focus_ring(false)
+                                .tab_stop(false)
                                 .icon(
                                     Icon::new(if has_active {
                                         CatIcon::Pause
@@ -293,8 +299,13 @@ pub(crate) fn sidebar(
                         .justify_center()
                         .child(
                             Button::new(ElementId::Name(format!("sched-{name}").into()))
-                                .ghost()
+                                .custom(
+                                    ButtonCustomVariant::new(cx)
+                                        .active(with_alpha(pal.muted, 0.12)),
+                                )
                                 .compact()
+                                .focus_ring(false)
+                                .tab_stop(false)
                                 .icon(
                                     Icon::new(gpui_kit::assets::IconName::Clock)
                                         .size(px(12.))
@@ -331,8 +342,13 @@ pub(crate) fn sidebar(
                             let weak_opts = weak.clone();
                             let name_opts = name.clone();
                             Button::new(ElementId::Name(format!("opts-{name}").into()))
-                                .ghost()
+                                .custom(
+                                    ButtonCustomVariant::new(cx)
+                                        .active(with_alpha(pal.muted, 0.12)),
+                                )
                                 .compact()
+                                .focus_ring(false)
+                                .tab_stop(false)
                                 .icon(IconName::EllipsisVertical)
                                 .tooltip(t(Key::ListTipOptions))
                                 .on_click(move |_, window, cx: &mut App| {
@@ -356,8 +372,13 @@ pub(crate) fn sidebar(
                             .justify_center()
                             .child(
                                 Button::new(ElementId::Name(format!("del-{name}").into()))
-                                    .ghost()
+                                    .custom(
+                                        ButtonCustomVariant::new(cx)
+                                            .active(with_alpha(pal.muted, 0.12)),
+                                    )
                                     .compact()
+                                    .focus_ring(false)
+                                    .tab_stop(false)
                                     .icon(IconName::Delete)
                                     .text_color(pal.bad)
                                     .tooltip(t(Key::ListTipDelete))
@@ -787,6 +808,235 @@ fn field_label(label: impl AsRef<str>, pal: Palette) -> AnyElement {
         .into_any_element()
 }
 
+/// Eight palette circles plus a rainbow circle that opens the custom picker.
+fn list_color_row(
+    weak: WeakEntity<MainView>,
+    pal: Palette,
+    choice: u8,
+    custom: Option<&str>,
+    picker_open: bool,
+) -> Div {
+    let mut row = div().w_full().flex().flex_row().mirror().gap(px(6.));
+    for i in 0..8u8 {
+        let weak_swatch = weak.clone();
+        row = row.child(
+            div()
+                .id(ElementId::Name(format!("list-color-{i}").into()))
+                .size(px(20.))
+                .rounded_full()
+                .bg(pal.list_color(i))
+                .border_2()
+                .border_color(if custom.is_none() && i == choice {
+                    pal.text
+                } else {
+                    pal.card
+                })
+                .hover(|s| s.border_color(pal.accent))
+                .on_click(move |_, _, cx: &mut App| {
+                    weak_swatch
+                        .update(cx, |this, cx| {
+                            this.list_color_choice = i;
+                            this.list_color_hex = None;
+                            this.list_color_picker = false;
+                            let (h, s, v) =
+                                crate::theme::color_to_hsv(pal.list_color(i));
+                            this.picker_hue = h;
+                            this.picker_sat = s;
+                            this.picker_val = v;
+                            cx.notify();
+                        })
+                        .ok();
+                }),
+        );
+    }
+    let weak_custom = weak.clone();
+    let active = picker_open || custom.is_some();
+    let mut custom_circle = div()
+        .id("list-color-custom")
+        .relative()
+        .size(px(20.))
+        .rounded_full()
+        .overflow_hidden()
+        .border_2()
+        .border_color(if active { pal.text } else { pal.card })
+        .hover(|s| s.border_color(pal.accent))
+        .on_click(move |_, _, cx: &mut App| {
+            weak_custom
+                .update(cx, |this, cx| {
+                    this.list_color_picker = !this.list_color_picker;
+                    if this.list_color_picker {
+                        let base = this
+                            .list_color_hex
+                            .as_deref()
+                            .and_then(crate::theme::parse_color_hex)
+                            .unwrap_or_else(|| {
+                                crate::theme::hsv_color(
+                                    this.picker_hue,
+                                    this.picker_sat,
+                                    this.picker_val,
+                                )
+                            });
+                        let (h, s, v) = crate::theme::color_to_hsv(base);
+                        this.picker_hue = h;
+                        this.picker_sat = s;
+                        this.picker_val = v;
+                    }
+                    cx.notify();
+                })
+                .ok();
+        });
+    if let Some(hex) = custom.and_then(crate::theme::parse_color_hex) {
+        custom_circle = custom_circle.bg(hex);
+    } else {
+        let quarter = px(10.);
+        custom_circle = custom_circle
+            .child(div().absolute().top_0().left_0().size(quarter).bg(crate::theme::rgb(0xff3b5c)))
+            .child(div().absolute().top_0().right_0().size(quarter).bg(crate::theme::rgb(0xffb300)))
+            .child(div().absolute().bottom_0().left_0().size(quarter).bg(crate::theme::rgb(0x00e676)))
+            .child(div().absolute().bottom_0().right_0().size(quarter).bg(crate::theme::rgb(0x58a6ff)))
+            .child(div().absolute().top(px(9.)).left(px(3.)).w(px(14.)).h(px(2.)).rounded_full().bg(pal.text))
+            .child(div().absolute().top(px(3.)).left(px(9.)).w(px(2.)).h(px(14.)).rounded_full().bg(pal.text));
+    }
+    row.child(custom_circle)
+}
+
+/// Inline saturation/brightness square and hue strip. Clicking updates the
+/// shared custom colour state used by both list dialogs.
+fn color_picker_panel(
+    weak: WeakEntity<MainView>,
+    pal: Palette,
+    hue: f32,
+    sat: f32,
+    val: f32,
+) -> Div {
+    const COLS: usize = 16;
+    const ROWS: usize = 8;
+    let selected_col = (sat * (COLS - 1) as f32).round() as usize;
+    let selected_row = ((1.0 - val) * (ROWS - 1) as f32).round() as usize;
+    let mut grid = div().w_full().flex().flex_col().rounded(px(8.)).overflow_hidden();
+    for row in 0..ROWS {
+        let mut line = div().w_full().flex().flex_row();
+        for col in 0..COLS {
+            let s = col as f32 / (COLS - 1) as f32;
+            let v = 1.0 - row as f32 / (ROWS - 1) as f32;
+            let selected = col == selected_col && row == selected_row;
+            let weak_cell = weak.clone();
+            line = line.child(
+                div()
+                    .id(ElementId::Name(format!("picker-cell-{row}-{col}").into()))
+                    .flex_1()
+                    .h(px(12.))
+                    .bg(crate::theme::hsv_color(hue, s, v))
+                    .border_1()
+                    .border_color(if selected {
+                        pal.text
+                    } else {
+                        with_alpha(pal.text, 0.0)
+                    })
+                    .on_click(move |_, _, cx: &mut App| {
+                        weak_cell
+                            .update(cx, |this, cx| {
+                                this.picker_sat = s;
+                                this.picker_val = v;
+                                this.list_color_hex = Some(crate::theme::hsv_hex(
+                                    this.picker_hue,
+                                    s,
+                                    v,
+                                ));
+                                cx.notify();
+                            })
+                            .ok();
+                    }),
+            );
+        }
+        grid = grid.child(line);
+    }
+
+    let selected_hue = ((hue * 24.0).round() as usize) % 24;
+    let mut hues = div().w_full().h(px(14.)).flex().flex_row().rounded(px(7.)).overflow_hidden();
+    for i in 0..24 {
+        let h = i as f32 / 24.0;
+        let weak_hue = weak.clone();
+        hues = hues.child(
+            div()
+                .id(ElementId::Name(format!("picker-hue-{i}").into()))
+                .flex_1()
+                .h_full()
+                .bg(crate::theme::hsv_color(h, 1.0, 1.0))
+                .border_1()
+                .border_color(if i == selected_hue {
+                    pal.text
+                } else {
+                    with_alpha(pal.text, 0.0)
+                })
+                .on_click(move |_, _, cx: &mut App| {
+                    weak_hue
+                        .update(cx, |this, cx| {
+                            this.picker_hue = h;
+                            this.list_color_hex = Some(crate::theme::hsv_hex(
+                                h,
+                                this.picker_sat,
+                                this.picker_val,
+                            ));
+                            cx.notify();
+                        })
+                        .ok();
+                }),
+        );
+    }
+
+    let weak_close = weak.clone();
+    div()
+        .w_full()
+        .p(px(10.))
+        .rounded(px(10.))
+        .bg(pal.bg)
+        .border_1()
+        .border_color(pal.line)
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_row()
+                .mirror()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .size(px(18.))
+                        .rounded_full()
+                        .bg(crate::theme::hsv_color(hue, sat, val)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .text_xs()
+                        .text_color(pal.text)
+                        .child(t(Key::ListColorCustom)),
+                )
+                .child(
+                    Button::new("picker-close")
+                        .ghost()
+                        .compact()
+                        .icon(IconName::Close)
+                        .tooltip(t(Key::CommonClose))
+                        .on_click(move |_, _, cx: &mut App| {
+                            weak_close
+                                .update(cx, |this, cx| {
+                                    this.list_color_picker = false;
+                                    cx.notify();
+                                })
+                                .ok();
+                        }),
+                ),
+        )
+        .child(grid)
+        .child(hues)
+}
+
 /// A collapsible section title: the whole row toggles the group open or shut.
 fn section_header(
     label: impl AsRef<str>,
@@ -1030,7 +1280,18 @@ impl MainView {
         };
         let pal = self.pal;
         self.list_opts_cap = list.max_parallel;
-        self.list_opts_color = list.color;
+        self.list_color_choice = list.color;
+        self.list_color_hex = list.color_hex.clone();
+        self.list_color_picker = false;
+        let base = list
+            .color_hex
+            .as_deref()
+            .and_then(crate::theme::parse_color_hex)
+            .unwrap_or_else(|| pal.list_color(list.color));
+        let (hue, sat, val) = crate::theme::color_to_hsv(base);
+        self.picker_hue = hue;
+        self.picker_sat = sat;
+        self.picker_val = val;
         self.list_opts_shutdown = list.shutdown_at_end;
         self.list_opts_sched = list.sched_start.is_some() && list.sched_end.is_some();
         let sched_signal = cx.new(|_| self.list_opts_sched);
@@ -1160,36 +1421,26 @@ impl MainView {
                 )
                 .child(div().w(px(72.)).child(Input::new(&cap_field_render)));
 
-            let mut swatches = div().w_full().flex().flex_row().mirror().gap(px(6.));
-            let current_color = weak
-                .read_with(cx, |this, _| this.list_opts_color)
-                .unwrap_or(0);
-            for i in 0..8u8 {
-                let tone = pal.list_color(i);
-                let weak_swatch = weak.clone();
-                swatches = swatches.child(
-                    div()
-                        .id(ElementId::Name(format!("list-color-{i}").into()))
-                        .size(px(20.))
-                        .rounded_full()
-                        .bg(tone)
-                        .border_2()
-                        .border_color(if i == current_color {
-                            pal.text
-                        } else {
-                            pal.card
-                        })
-                        .hover(|s| s.border_color(pal.accent))
-                        .on_click(move |_, _, cx: &mut App| {
-                            weak_swatch
-                                .update(cx, |this, cx| {
-                                    this.list_opts_color = i;
-                                    cx.notify();
-                                })
-                                .ok();
-                        }),
-                );
-            }
+            let (choice, custom, picker_open, hue, sat, val) = weak
+                .read_with(cx, |this, _| {
+                    (
+                        this.list_color_choice,
+                        this.list_color_hex.clone(),
+                        this.list_color_picker,
+                        this.picker_hue,
+                        this.picker_sat,
+                        this.picker_val,
+                    )
+                })
+                .unwrap_or((0, None, false, 0.0, 1.0, 1.0));
+            let swatches = list_color_row(
+                weak.clone(),
+                pal,
+                choice,
+                custom.as_deref(),
+                picker_open,
+            );
+            let picker_panel = color_picker_panel(weak.clone(), pal, hue, sat, val);
 
             let weak_ok = weak.clone();
             let name_ok = name.clone();
@@ -1211,6 +1462,7 @@ impl MainView {
                         .child(caps)
                         .child(field_label(t(Key::ListFieldColor), pal))
                         .child(swatches)
+                        .when(picker_open, |d| d.child(picker_panel))
                         .child(field_label(t(Key::ListFieldWindow), pal))
                         .child({
                             let weak_sched = weak.clone();
@@ -1397,15 +1649,16 @@ impl MainView {
                             } else {
                                 None
                             };
-                            let (stored_cap, color, shutdown) = weak_ok
+                            let (stored_cap, color, custom_hex, shutdown) = weak_ok
                                 .read_with(cx, |this, _| {
                                     (
                                         this.list_opts_cap,
-                                        this.list_opts_color,
+                                        this.list_color_choice,
+                                        this.list_color_hex.clone(),
                                         this.list_opts_shutdown,
                                     )
                                 })
-                                .unwrap_or((0, 0, false));
+                                .unwrap_or((0, 0, None, false));
                             // A typed count wins over the presets; an empty box
                             // means the list has no cap.
                             let typed = crate::text::from_fa_digits(cap_field_save.read(cx).value().trim());
@@ -1444,10 +1697,17 @@ impl MainView {
                                                 sched,
                                                 shutdown_at_end: shutdown,
                                             });
-                                            this.svc.apply(Command::SetListColor {
-                                                name: target,
-                                                color,
-                                            });
+                                            if let Some(hex) = custom_hex {
+                                                this.svc.apply(Command::SetListColorHex {
+                                                    name: target,
+                                                    hex: Some(hex),
+                                                });
+                                            } else {
+                                                this.svc.apply(Command::SetListColor {
+                                                    name: target,
+                                                    color,
+                                                });
+                                            }
                                             cx.notify();
                                         })
                                         .ok();
@@ -1509,14 +1769,54 @@ impl MainView {
 
     fn new_list_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder(t(Key::ListNamePlaceholder)));
+        let pal = self.pal;
+        let next = (self.svc.lists().len() % crate::core::prefs::LIST_COLOR_COUNT) as u8;
+        self.list_color_choice = next;
+        self.list_color_hex = None;
+        self.list_color_picker = false;
+        let (hue, sat, val) = crate::theme::color_to_hsv(pal.list_color(next));
+        self.picker_hue = hue;
+        self.picker_sat = sat;
+        self.picker_val = val;
         let weak = cx.entity().downgrade();
         let input = name.clone();
-        window.open_dialog(cx, move |dialog, _window, _cx| {
+        window.open_dialog(cx, move |dialog, _window, cx| {
             let weak_ok = weak.clone();
             let input_ok = input.clone();
+            let (choice, custom, picker_open, hue, sat, val) = weak
+                .read_with(cx, |this, _| {
+                    (
+                        this.list_color_choice,
+                        this.list_color_hex.clone(),
+                        this.list_color_picker,
+                        this.picker_hue,
+                        this.picker_sat,
+                        this.picker_val,
+                    )
+                })
+                .unwrap_or((0, None, false, 0.0, 1.0, 1.0));
+            let swatches = list_color_row(
+                weak.clone(),
+                pal,
+                choice,
+                custom.as_deref(),
+                picker_open,
+            );
+            let picker_panel = color_picker_panel(weak.clone(), pal, hue, sat, val);
             dialog
                 .title(t(Key::ListNewTitle))
-                .child(Input::new(&input))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(10.))
+                        .align_end()
+                        .child(Input::new(&input))
+                        .child(field_label(t(Key::ListFieldColor), pal))
+                        .child(swatches)
+                        .when(picker_open, |d| d.child(picker_panel)),
+                )
                 .footer(
                     DialogFooter::new()
                         .child(
@@ -1534,9 +1834,25 @@ impl MainView {
                                     if name.is_empty() {
                                         return;
                                     }
+                                    let (chosen, custom) = weak_ok
+                                        .read_with(cx, |this, _| {
+                                            (this.list_color_choice, this.list_color_hex.clone())
+                                        })
+                                        .unwrap_or((0, None));
                                     weak_ok
                                         .update(cx, |this, cx| {
                                             this.svc.apply(Command::CreateList(name.clone()));
+                                            if let Some(hex) = custom {
+                                                this.svc.apply(Command::SetListColorHex {
+                                                    name: name.clone(),
+                                                    hex: Some(hex),
+                                                });
+                                            } else {
+                                                this.svc.apply(Command::SetListColor {
+                                                    name: name.clone(),
+                                                    color: chosen,
+                                                });
+                                            }
                                             this.list_filter = Some(name);
                                             this.page = Page::Downloads;
                                             cx.notify();

@@ -34,6 +34,114 @@ const PARTS_W: f32 = 36.0;
 const LAST_W: f32 = 108.0;
 const ACTIONS_W: f32 = 156.0;
 
+/// Optional columns, in table order. Number and file name are always shown.
+pub(crate) const COLUMN_KEYS: [&str; 9] = [
+    "status", "lists", "size", "progress", "speed", "eta", "parts", "last", "actions",
+];
+
+pub(crate) fn column_label(key: &str) -> Key {
+    match key {
+        "status" => Key::ColStatus,
+        "lists" => Key::ColLists,
+        "size" => Key::ColSize,
+        "progress" => Key::ColProgress,
+        "speed" => Key::ColSpeed,
+        "eta" => Key::ColEta,
+        "parts" => Key::ColParts,
+        "last" => Key::ColLastDate,
+        _ => Key::ColActions,
+    }
+}
+
+fn column_default_width(key: &str) -> u32 {
+    match key {
+        "status" => STATUS_W as u32,
+        "lists" => LISTS_W as u32,
+        "size" => SIZE_W as u32,
+        "progress" => PROGRESS_W as u32,
+        "speed" => SPEED_W as u32,
+        "eta" => ETA_W as u32,
+        "parts" => PARTS_W as u32,
+        "last" => LAST_W as u32,
+        _ => ACTIONS_W as u32,
+    }
+}
+
+fn column_min_width(key: &str) -> u32 {
+    match key {
+        "lists" | "parts" => 26,
+        "actions" => 116,
+        _ => 44,
+    }
+}
+
+fn column_width(view: &MainView, key: &str) -> f32 {
+    if let Some(resize) = view.col_resize.as_ref() {
+        if resize.key == key {
+            return resize.current as f32;
+        }
+    }
+    view.svc
+        .prefs()
+        .column_widths
+        .get(key)
+        .copied()
+        .unwrap_or_else(|| column_default_width(key)) as f32
+}
+
+fn column_shown(view: &MainView, key: &str) -> bool {
+    !view.svc.prefs().column_hidden.iter().any(|k| k == key)
+}
+
+/// The visible optional columns and their current widths, captured once per
+/// table render so the header and every row agree.
+#[derive(Clone, Copy)]
+pub(crate) struct Cols {
+    pub(crate) status: Option<f32>,
+    pub(crate) lists: Option<f32>,
+    pub(crate) size: Option<f32>,
+    pub(crate) progress: Option<f32>,
+    pub(crate) speed: Option<f32>,
+    pub(crate) eta: Option<f32>,
+    pub(crate) parts: Option<f32>,
+    pub(crate) last: Option<f32>,
+    pub(crate) actions: Option<f32>,
+}
+
+impl Cols {
+    pub(crate) fn from(view: &MainView) -> Self {
+        let mut cols = Self {
+            status: None,
+            lists: None,
+            size: None,
+            progress: None,
+            speed: None,
+            eta: None,
+            parts: None,
+            last: None,
+            actions: None,
+        };
+        for key in COLUMN_KEYS {
+            if !column_shown(view, key) {
+                continue;
+            }
+            let width = Some(column_width(view, key));
+            match key {
+                "status" => cols.status = width,
+                "lists" => cols.lists = width,
+                "size" => cols.size = width,
+                "progress" => cols.progress = width,
+                "speed" => cols.speed = width,
+                "eta" => cols.eta = width,
+                "parts" => cols.parts = width,
+                "last" => cols.last = width,
+                _ => cols.actions = width,
+            }
+        }
+        cols
+    }
+}
+
 /// Finish time, falling back to the added time for pre-0.5.21 completed rows.
 fn last_started_ms(s: &Snapshot) -> u64 {
     // Not started yet: the add time is the best "last date" we have.
@@ -175,12 +283,12 @@ pub(crate) fn table(
         .svc
         .lists()
         .iter()
-        .map(|l| (l.name.clone(), pal.list_color(l.color)))
+        .map(|l| (l.name.clone(), pal.list_color_of(l)))
         .collect();
     let mut badge_map: std::collections::HashMap<String, Vec<Hsla>> =
         std::collections::HashMap::new();
     for list in view.svc.lists() {
-        let color = pal.list_color(list.color);
+        let color = pal.list_color_of(list);
         for id in &list.items {
             badge_map.entry(id.clone()).or_default().push(color);
         }
@@ -188,7 +296,8 @@ pub(crate) fn table(
     let auto_queued = view.svc.auto_queued_ids();
     let scheduled = view.svc.scheduled_ids();
 
-    let header = header_row(view, &rows, all_selected, cx);
+    let cols = Cols::from(view);
+    let header = header_row(view, &rows, all_selected, cols, cx);
     let weak = cx.entity().downgrade();
 
     if rows.is_empty() {
@@ -211,6 +320,18 @@ pub(crate) fn table(
                     .justify_center()
                     .gap(px(6.))
                     .flex_1()
+                    .on_mouse_down(MouseButton::Left, {
+                        let weak = weak.clone();
+                        move |_, _, cx: &mut App| {
+                            weak.update(cx, |this, cx| {
+                                if !this.selected.is_empty() {
+                                    this.selected.clear();
+                                    cx.notify();
+                                }
+                            })
+                            .ok();
+                        }
+                    })
                     .child(div().text_lg().font_semibold().text_color(pal.text).align_end().child(title))
                     .child(div().text_sm().text_color(pal.muted).align_end().child(hint)),
             )
@@ -241,6 +362,7 @@ pub(crate) fn table(
     let dark = pal.dark;
     let selected_count = view.selected.len();
     let scroll = view.row_scroll.clone();
+    let weak_list = weak.clone();
 
     div()
         .flex()
@@ -273,10 +395,23 @@ pub(crate) fn table(
                             r.auto,
                             r.scheduled,
                             r.dots.clone(),
+                            cols,
                             &pal,
                         )
                     })
                     .collect::<Vec<_>>()
+            })
+            .on_mouse_down(MouseButton::Left, {
+                let weak = weak_list.clone();
+                move |_, _, cx: &mut App| {
+                    weak.update(cx, |this, cx| {
+                        if !this.selected.is_empty() {
+                            this.selected.clear();
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                }
             })
             .track_scroll(&scroll)
             .flex_1()
@@ -310,6 +445,7 @@ fn header_row(
     view: &mut MainView,
     rows: &[Snapshot],
     all_selected: bool,
+    cols: Cols,
     cx: &mut Context<MainView>,
 ) -> AnyElement {
     let pal = view.pal;
@@ -317,7 +453,7 @@ fn header_row(
     let ids: Vec<String> = rows.iter().map(|s| s.id.clone()).collect();
     let sort = view.sort;
 
-    div()
+    let mut header = div()
         .w_full()
         .flex()
         .flex_row()
@@ -352,63 +488,193 @@ fn header_row(
                     }
                 }),
         )
-        .child(sort_label(t(Key::ColNum), SortCol::Num, sort, weak.clone(), pal, false))
-        .child(sort_label(
-            t(Key::ColStatus),
-            SortCol::Status,
-            sort,
+        .child(static_header(
+            NUM_W,
+            sort_label(t(Key::ColNum), SortCol::Num, sort, weak.clone(), pal, false),
+        ));
+    if let Some(w) = cols.status {
+        header = header.child(resizable_header(
+            w,
+            "status",
+            sort_label(t(Key::ColStatus), SortCol::Status, sort, weak.clone(), pal, false),
             weak.clone(),
             pal,
-            false,
-        ))
-        .child(cell(LISTS_W, t(Key::ColLists)))
-        .child(sort_label(
-            t(Key::ColFileName),
-            SortCol::Name,
-            sort,
+            column_default_width("status"),
+            column_min_width("status"),
+        ));
+    }
+    if let Some(w) = cols.lists {
+        header = header.child(resizable_header(
+            w,
+            "lists",
+            header_text(t(Key::ColLists)),
             weak.clone(),
             pal,
-            true,
-        ))
-        .child(sort_label(t(Key::ColSize), SortCol::Size, sort, weak.clone(), pal, false))
-        .child(sort_label(
-            t(Key::ColProgress),
-            SortCol::Progress,
-            sort,
+            column_default_width("lists"),
+            column_min_width("lists"),
+        ));
+    }
+    header = header.child(sort_label(
+        t(Key::ColFileName),
+        SortCol::Name,
+        sort,
+        weak.clone(),
+        pal,
+        true,
+    ));
+    if let Some(w) = cols.size {
+        header = header.child(resizable_header(
+            w,
+            "size",
+            sort_label(t(Key::ColSize), SortCol::Size, sort, weak.clone(), pal, false),
             weak.clone(),
             pal,
-            false,
-        ))
-        .child(sort_label(
-            t(Key::ColSpeed),
-            SortCol::Speed,
-            sort,
+            column_default_width("size"),
+            column_min_width("size"),
+        ));
+    }
+    if let Some(w) = cols.progress {
+        header = header.child(resizable_header(
+            w,
+            "progress",
+            sort_label(t(Key::ColProgress), SortCol::Progress, sort, weak.clone(), pal, false),
             weak.clone(),
             pal,
-            false,
-        ))
-        .child(sort_label(t(Key::ColEta), SortCol::Eta, sort, weak.clone(), pal, false))
-        .child(cell(PARTS_W, t(Key::ColParts)))
-        .child(sort_label(
-            t(Key::ColLastDate),
-            SortCol::LastDate,
-            sort,
+            column_default_width("progress"),
+            column_min_width("progress"),
+        ));
+    }
+    if let Some(w) = cols.speed {
+        header = header.child(resizable_header(
+            w,
+            "speed",
+            sort_label(t(Key::ColSpeed), SortCol::Speed, sort, weak.clone(), pal, false),
+            weak.clone(),
+            pal,
+            column_default_width("speed"),
+            column_min_width("speed"),
+        ));
+    }
+    if let Some(w) = cols.eta {
+        header = header.child(resizable_header(
+            w,
+            "eta",
+            sort_label(t(Key::ColEta), SortCol::Eta, sort, weak.clone(), pal, false),
+            weak.clone(),
+            pal,
+            column_default_width("eta"),
+            column_min_width("eta"),
+        ));
+    }
+    if let Some(w) = cols.parts {
+        header = header.child(resizable_header(
+            w,
+            "parts",
+            header_text(t(Key::ColParts)),
+            weak.clone(),
+            pal,
+            column_default_width("parts"),
+            column_min_width("parts"),
+        ));
+    }
+    if let Some(w) = cols.last {
+        header = header.child(resizable_header(
+            w,
+            "last",
+            sort_label(t(Key::ColLastDate), SortCol::LastDate, sort, weak.clone(), pal, false),
+            weak.clone(),
+            pal,
+            column_default_width("last"),
+            column_min_width("last"),
+        ));
+    }
+    if let Some(w) = cols.actions {
+        header = header.child(resizable_header(
+            w,
+            "actions",
+            header_text(t(Key::ColActions)),
             weak,
             pal,
-            false,
-        ))
-        .child(cell(ACTIONS_W, t(Key::ColActions)))
-        .into_any_element()
+            column_default_width("actions"),
+            column_min_width("actions"),
+        ));
+    }
+    header.into_any_element()
 }
 
-fn cell(width: f32, label: impl AsRef<str>) -> AnyElement {
+fn header_text(label: impl AsRef<str>) -> AnyElement {
     div()
-        .w(px(width))
-        .flex_shrink_0()
+        .w_full()
+        .h_full()
+        .flex()
+        .items_center()
         .overflow_hidden()
         .whitespace_nowrap()
         .align_end()
         .child(label.as_ref().to_string())
+        .into_any_element()
+}
+
+fn static_header(width: f32, content: AnyElement) -> AnyElement {
+    div()
+        .w(px(width))
+        .h_full()
+        .flex_shrink_0()
+        .child(content)
+        .into_any_element()
+}
+
+/// Header cell with a grip on its end edge. Dragging the grip resizes the
+/// column through the full-window overlay in `app`.
+#[allow(clippy::too_many_arguments)]
+fn resizable_header(
+    width: f32,
+    key: &'static str,
+    content: AnyElement,
+    weak: WeakEntity<MainView>,
+    pal: Palette,
+    default_width: u32,
+    min_width: u32,
+) -> AnyElement {
+    div()
+        .relative()
+        .w(px(width))
+        .h_full()
+        .flex_shrink_0()
+        .child(content)
+        .child(
+            div()
+                .id(ElementId::Name(format!("col-grip-{key}").into()))
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .w(px(7.))
+                .edge_end(px(-4.))
+                .cursor_col_resize()
+                .hover(|s| s.bg(with_alpha(pal.accent, 0.45)))
+                .on_mouse_down(MouseButton::Left, move |event, _, cx: &mut App| {
+                    let start_x = event.position.x.as_f32();
+                    weak.update(cx, |this, cx| {
+                        let start_w = this
+                            .svc
+                            .prefs()
+                            .column_widths
+                            .get(key)
+                            .copied()
+                            .unwrap_or(default_width);
+                        this.col_resize = Some(crate::app::ColResize {
+                            key: key.to_string(),
+                            start_x,
+                            start_w: start_w as f32,
+                            current: start_w,
+                            min: min_width,
+                            max: 420,
+                        });
+                        cx.notify();
+                    })
+                    .ok();
+                }),
+        )
         .into_any_element()
 }
 
@@ -456,20 +722,10 @@ fn sort_label(
         el.child(text).child(arrow)
     };
     if grow {
-        el.flex_1().min_w_0()
+        el.flex_1().min_w_0().into_any_element()
     } else {
-        let w = match col {
-            SortCol::Status => STATUS_W,
-            SortCol::Size => SIZE_W,
-            SortCol::Progress => PROGRESS_W,
-            SortCol::Speed => SPEED_W,
-            SortCol::Eta => ETA_W,
-            SortCol::LastDate => LAST_W,
-            _ => NUM_W,
-        };
-        el.w(px(w)).flex_shrink_0()
+        el.w_full().into_any_element()
     }
-    .into_any_element()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -481,6 +737,7 @@ fn row(
     auto: bool,
     scheduled: bool,
     dots: Vec<Hsla>,
+    cols: Cols,
     pal: &Palette,
 ) -> AnyElement {
     let id = snap.id.clone();
@@ -664,10 +921,66 @@ fn row(
 
     div()
         .id(ElementId::Name(format!("row-{id}").into()))
-        // Right-click anywhere on the card opens its properties.
+        // Clicking the card body behaves like its checkbox, and dragging
+        // across rows extends the same selection.
+        .on_mouse_down(MouseButton::Left, {
+            let weak = weak.clone();
+            let id = id.clone();
+            move |_, _, cx: &mut App| {
+                cx.stop_propagation();
+                let add = !selected;
+                let id = id.clone();
+                weak.update(cx, |this, _cx| {
+                    this.drag_select = Some(crate::app::DragSelect {
+                        add,
+                        start_id: id,
+                        dragging: false,
+                    });
+                })
+                .ok();
+            }
+        })
+        .on_mouse_up(MouseButton::Left, {
+            let weak = weak.clone();
+            let id = id.clone();
+            move |_, _, cx: &mut App| {
+                cx.stop_propagation();
+                let id = id.clone();
+                weak.update(cx, |this, cx| {
+                    let Some(drag) = this.drag_select.take() else {
+                        return;
+                    };
+                    if drag.dragging {
+                        cx.notify();
+                    } else if drag.start_id == id {
+                        if drag.add {
+                            this.selected.insert(id);
+                        } else {
+                            this.selected.remove(&id);
+                        }
+                        cx.notify();
+                    }
+                })
+                .ok();
+            }
+        })
+        // Right-click selects the card (unless it is already part of the
+        // selection) and opens its properties.
         .on_mouse_down(MouseButton::Right, move |_, window, cx: &mut App| {
             props_weak
-                .update(cx, |this, cx| this.props_dialog(props_id.clone(), window, cx))
+                .update(cx, |this, cx| {
+                    // First right-click clears any current selection; the next
+                    // one selects the card under the pointer and opens
+                    // Properties.
+                    if !this.selected.is_empty() {
+                        this.selected.clear();
+                        cx.notify();
+                        return;
+                    }
+                    this.selected.insert(props_id.clone());
+                    this.props_dialog(props_id.clone(), window, cx);
+                    cx.notify();
+                })
                 .ok();
         })
         // Crossing rows while the button is held extends the checkbox drag.
@@ -734,6 +1047,7 @@ fn row(
                     // Press starts a drag; a release without crossing another
                     // row is a plain click.
                     .on_mouse_down(MouseButton::Left, move |_, _, cx: &mut App| {
+                        cx.stop_propagation();
                         let add = !selected;
                         let id = id_start.clone();
                         weak_start
@@ -747,6 +1061,7 @@ fn row(
                             .ok();
                     })
                     .on_mouse_up(MouseButton::Left, move |_, _, cx: &mut App| {
+                        cx.stop_propagation();
                         let id = id_end.clone();
                         weak_end
                             .update(cx, |this, cx| {
@@ -776,26 +1091,30 @@ fn row(
                 .text_color(if selected { pal.text } else { pal.muted })
                 .child(ltr_isolate(&format!("#{num}"))),
         )
-        .child(
-            div()
-                .w(px(STATUS_W))
-                .flex_shrink_0()
-                .child(status_pill(status_label, status_color)),
-        )
-        .child(
-            div()
-                .w(px(LISTS_W))
-                .flex_shrink_0()
-                .flex()
-                .flex_row()
-                .mirror()
-                .gap(px(3.))
-                .children(dots.iter().take(2).map(|c| {
-                    Icon::new(gpui_kit::assets::IconName::List)
-                        .size(px(13.))
-                        .text_color(*c)
-                })),
-        )
+        .when(cols.status.is_some(), |d| {
+            d.child(
+                div()
+                    .w(px(cols.status.unwrap_or(0.)))
+                    .flex_shrink_0()
+                    .child(status_pill(status_label, status_color)),
+            )
+        })
+        .when(cols.lists.is_some(), |d| {
+            d.child(
+                div()
+                    .w(px(cols.lists.unwrap_or(0.)))
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .mirror()
+                    .gap(px(3.))
+                    .children(dots.iter().take(2).map(|c| {
+                        Icon::new(gpui_kit::assets::IconName::List)
+                            .size(px(13.))
+                            .text_color(*c)
+                    })),
+            )
+        })
         .child(
             div()
                 .flex_1()
@@ -828,40 +1147,56 @@ fn row(
                         .child(bar),
                 ),
         )
-        .child(cell_text(SIZE_W, ltr_isolate(&size), pal.text))
-        .child(cell_text(PROGRESS_W, ltr_isolate(&pct), pal.text))
-        .child(cell_text(SPEED_W, ltr_isolate(&speed), pal.text))
-        .child(cell_text(ETA_W, ltr_isolate(&eta), pal.muted))
-        .child(cell_text(PARTS_W, ltr_isolate(&parts), pal.muted))
-        .child({
-            let full = last_download_full(&snap);
-            div()
-                .w(px(LAST_W))
-                .flex_shrink_0()
-                .overflow_hidden()
-                .child(
-                    Button::new(ElementId::Name(format!("last-{id}").into()))
-                        .ghost()
-                        .compact()
-                        .label(ltr_isolate(&last_download_text(&snap)))
-                        .text_color(pal.muted)
-                        .tooltip(full),
-                )
+        .when(cols.size.is_some(), |d| {
+            d.child(cell_text(cols.size.unwrap_or(0.), ltr_isolate(&size), pal.text))
         })
-        .child(
-            div()
-                .w(px(ACTIONS_W))
-                .flex_shrink_0()
-                .flex()
-                .flex_row()
-                .mirror()
-                .items_center()
-                .gap(px(2.))
-                .child(action)
-                .child(toggle)
-                .child(list_btn)
-                .child(remove),
-        )
+        .when(cols.progress.is_some(), |d| {
+            d.child(cell_text(cols.progress.unwrap_or(0.), ltr_isolate(&pct), pal.text))
+        })
+        .when(cols.speed.is_some(), |d| {
+            d.child(cell_text(cols.speed.unwrap_or(0.), ltr_isolate(&speed), pal.text))
+        })
+        .when(cols.eta.is_some(), |d| {
+            d.child(cell_text(cols.eta.unwrap_or(0.), ltr_isolate(&eta), pal.muted))
+        })
+        .when(cols.parts.is_some(), |d| {
+            d.child(cell_text(cols.parts.unwrap_or(0.), ltr_isolate(&parts), pal.muted))
+        })
+        .when(cols.last.is_some(), |d| {
+            let full = last_download_full(&snap);
+            d.child(
+                div()
+                    .w(px(cols.last.unwrap_or(0.)))
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .child(
+                        Button::new(ElementId::Name(format!("last-{id}").into()))
+                            .ghost()
+                            .compact()
+                            .label(ltr_isolate(&last_download_text(&snap)))
+                            .text_color(pal.muted)
+                            .tooltip(full),
+                    ),
+            )
+        })
+        .when(cols.actions.is_some(), |d| {
+            d.child(
+                div()
+                    .w(px(cols.actions.unwrap_or(0.)))
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .mirror()
+                    .items_center()
+                    .gap(px(2.))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx: &mut App| cx.stop_propagation())
+                    .on_mouse_up(MouseButton::Left, |_, _, cx: &mut App| cx.stop_propagation())
+                    .child(action)
+                    .child(toggle)
+                    .child(list_btn)
+                    .child(remove),
+            )
+        })
         .into_any_element()
 }
 

@@ -3,6 +3,7 @@
 //! Shared by every user interface: the layout of this file is part of the
 //! application's contract, not of any particular GUI toolkit.
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 fn def_retry_parts() -> bool { false }
@@ -18,18 +19,24 @@ fn def_focus_new() -> bool { true }
 /// without the leading dot. Chosen so the common large-file downloads
 /// (archives, disk images, installers, media) are covered.
 pub(crate) const DEFAULT_DIRECT_FORMATS: [&str; 38] = [
-    "7z", "zip", "rar", "tar", "gz", "bz2", "xz", "tgz", "cab",
-    "iso", "img", "dmg", "vhd", "wim",
-    "exe", "msi", "msix", "apk", "deb", "rpm", "pkg",
-    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg",
-    "mp3", "flac", "wav", "ogg", "m4a",
-    "pdf", "epub", "torrent",
+    "7z", "zip", "rar", "tar", "gz", "bz2", "xz", "tgz", "cab", "iso", "img", "dmg", "vhd", "wim", "exe", "msi", "msix", "apk", "deb", 
+	"rpm", "pkg", "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg","mp3", "flac", "wav", "ogg", "m4a", "pdf", "epub", "torrent",
 ];
 
 fn def_proxy_mode() -> String { "none".into() }
 fn def_proxy_kind() -> String { "http".into() }
 fn def_proxy_port() -> u16 { 8080 }
 fn def_proxy_true() -> bool { true }
+
+/// Normalize a typed colour to `#rrggbb`; `None` when it is not a 6-digit hex
+/// value. The leading `#` is optional.
+pub(crate) fn normalize_hex_color(raw: &str) -> Option<String> {
+    let s = raw.trim().trim_start_matches('#');
+    if s.len() != 6 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", s.to_ascii_lowercase()))
+}
 
 pub(crate) fn normalize_proxy_kind(raw: &str) -> String {
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -169,6 +176,9 @@ pub(crate) struct DownloadList {
     pub(crate) items: Vec<String>,
     #[serde(default)]
     pub(crate) color: u8,
+    /// Optional custom label colour (#rrggbb); overrides `color` when set.
+    #[serde(default)]
+    pub(crate) color_hex: Option<String>,
     /// Max downloads from this list running at once; 0 means unlimited.
     #[serde(default)]
     pub(crate) max_parallel: u32,
@@ -262,6 +272,12 @@ pub(crate) struct Prefs {
     pub(crate) proxy_ftp: bool,
     #[serde(default)]
     pub(crate) proxy_from_browser: bool,
+    /// Column keys the user chose to hide in the download table.
+    #[serde(default)]
+    pub(crate) column_hidden: Vec<String>,
+    /// Persisted per-column widths, keyed by the column name.
+    #[serde(default)]
+    pub(crate) column_widths: BTreeMap<String, u32>,
 }
 pub(crate) fn prefs_path() -> PathBuf {
     std::env::current_exe()
@@ -318,6 +334,8 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
                 proxy_https: p.proxy_https,
                 proxy_ftp: p.proxy_ftp,
                 proxy_from_browser: p.proxy_from_browser,
+                column_hidden: p.column_hidden,
+                column_widths: p.column_widths,
             };
         }
     }
@@ -353,6 +371,8 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
         proxy_https: true,
         proxy_ftp: false,
         proxy_from_browser: false,
+        column_hidden: Vec::new(),
+        column_widths: BTreeMap::new(),
     }
 }
 

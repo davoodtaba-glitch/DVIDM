@@ -205,6 +205,13 @@ impl DownloadService {
         Ok(())
     }
 
+    /// Move one download, and its partial data, into another folder.
+    pub(crate) fn set_dest(&mut self, id: &str, dir: PathBuf) -> Result<(), String> {
+        self.mgr.set_dest(id, dir)?;
+        self.view.snaps = self.mgr.list();
+        Ok(())
+    }
+
     /// Push the persisted preferences into the engine (connections, limits,
     /// retry policy, save folder).
     fn apply_settings(&mut self) {
@@ -469,6 +476,7 @@ impl DownloadService {
                         name,
                         items: Vec::new(),
                         color: (self.prefs.lists.len() % LIST_COLOR_COUNT) as u8,
+                        color_hex: None,
                         max_parallel: 0,
                         sched_start: None,
                         sched_end: None,
@@ -535,8 +543,34 @@ impl DownloadService {
             Command::SetListColor { name, color } => {
                 if let Some(l) = self.prefs.lists.iter_mut().find(|l| l.name == name) {
                     l.color = color % (LIST_COLOR_COUNT as u8);
+                    l.color_hex = None;
                     self.prefs.save();
                 }
+            }
+            Command::SetListColorHex { name, hex } => {
+                if let Some(l) = self.prefs.lists.iter_mut().find(|l| l.name == name) {
+                    l.color_hex = hex.as_deref().and_then(super::prefs::normalize_hex_color);
+                    self.prefs.save();
+                }
+            }
+            Command::SetColumnWidth { key, width } => {
+                self.prefs
+                    .column_widths
+                    .insert(key, width.clamp(32, 420));
+                self.prefs.save();
+            }
+            Command::SetColumnHidden { key, hidden } => {
+                let keys = &mut self.prefs.column_hidden;
+                keys.retain(|k| k != &key);
+                if hidden {
+                    keys.push(key);
+                }
+                self.prefs.save();
+            }
+            Command::ResetColumns => {
+                self.prefs.column_widths.clear();
+                self.prefs.column_hidden.clear();
+                self.prefs.save();
             }
             Command::SetFont(font) => {
                 // An empty value means "system default".
@@ -783,6 +817,7 @@ pub(crate) fn normalize_lists(lists: &mut Vec<DownloadList>) -> bool {
                         name: "main".into(),
                         items: Vec::new(),
                         color,
+                        color_hex: None,
                         max_parallel: 0,
                         sched_start: None,
                         sched_end: None,
