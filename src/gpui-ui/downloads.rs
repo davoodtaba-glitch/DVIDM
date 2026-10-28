@@ -16,6 +16,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::base::{Scrollbar, ScrollbarMode};
 use std::collections::HashSet;
+use std::time::Duration;
 
 /// Row height including the gap below it; uniform_list needs one height.
 const ROW_H: f32 = 70.0;
@@ -268,6 +269,28 @@ pub(crate) fn table(
                 .scroll_to_item(ix, ScrollStrategy::Nearest);
         }
     }
+    // Remember where each row sat last time so a pure reorder (start/pause,
+    // one add or one remove) can slide instead of jumping. Filter/search
+    // changes replace most of the list and are left unanimated.
+    let new_order: Vec<String> = rows.iter().map(|s| s.id.clone()).collect();
+    if view.row_order != new_order {
+        let old_set: HashSet<&String> = view.row_order.iter().collect();
+        let new_set: HashSet<&String> = new_order.iter().collect();
+        let changed = old_set.symmetric_difference(&new_set).count();
+        view.row_move_from.clear();
+        if changed <= 1 {
+            for (new_index, id) in new_order.iter().enumerate() {
+                if let Some(old_index) = view.row_order.iter().position(|x| x == id) {
+                    if old_index != new_index {
+                        view.row_move_from.insert(id.clone(), old_index);
+                    }
+                }
+            }
+            view.row_move_serial = view.row_move_serial.wrapping_add(1);
+        }
+        view.row_order = new_order;
+    }
+    let move_serial = view.row_move_serial;
     let total_rows = view.svc.view().snaps.len();
     let all_selected = !rows.is_empty() && rows.iter().all(|s| view.selected.contains(&s.id));
     // Queue positions are stable across sorting.
@@ -345,6 +368,7 @@ pub(crate) fn table(
         auto: bool,
         scheduled: bool,
         dots: Vec<Hsla>,
+        from: Option<usize>,
     }
     let row_data: Vec<Row> = rows
         .iter()
@@ -355,6 +379,7 @@ pub(crate) fn table(
             auto: auto_queued.contains(&s.id),
             scheduled: scheduled.contains(&s.id),
             dots: badge_map.get(&s.id).cloned().unwrap_or_default(),
+            from: view.row_move_from.get(&s.id).copied(),
         })
         .collect();
     let _ = list_dots;
@@ -391,6 +416,9 @@ pub(crate) fn table(
                             weak.clone(),
                             r.snap.clone(),
                             r.num,
+                            ix,
+                            r.from,
+                            move_serial,
                             r.selected,
                             r.auto,
                             r.scheduled,
@@ -733,6 +761,9 @@ fn row(
     weak: WeakEntity<MainView>,
     snap: Snapshot,
     num: usize,
+    row_index: usize,
+    from_index: Option<usize>,
+    move_serial: u64,
     selected: bool,
     auto: bool,
     scheduled: bool,
@@ -919,8 +950,15 @@ fn row(
     let props_weak = weak.clone();
     let props_id = id.clone();
 
-    div()
+    let row_anim_id = id.clone();
+    // The card is absolutely positioned inside a fixed-height slot so a
+    // reorder can slide it with `top`; a relative offset on the slot root is
+    // ignored by the layout engine.
+    let row = div()
         .id(ElementId::Name(format!("row-{id}").into()))
+        .absolute()
+        .left(px(0.))
+        .right(px(0.))
         // Clicking the card body behaves like its checkbox, and dragging
         // across rows extends the same selection.
         .on_mouse_down(MouseButton::Left, {
@@ -1016,11 +1054,8 @@ fn row(
                 .ok();
             }
         })
-        .w_full()
         .min_w_0()
-        .flex_shrink_0()
         .h(px(ROW_H - ROW_GAP))
-        .mb(px(ROW_GAP))
         .px(px(6.))
         .rounded(px(10.))
         .bg(if selected { with_alpha(pal.accent, 0.10) } else { pal.card })
@@ -1196,7 +1231,30 @@ fn row(
                     .child(list_btn)
                     .child(remove),
             )
-        })
+        });
+
+    let from = from_index.filter(|from| *from != row_index);
+    let card = if let Some(from) = from {
+        let delta = (from as f32 - row_index as f32) * ROW_H;
+        let animation_id =
+            format!("row-move-{row_anim_id}-{move_serial}");
+        row.with_animation(
+            animation_id,
+            Animation::new(Duration::from_millis(240))
+                .with_easing(|t| 1.0 - (1.0 - t) * (1.0 - t)),
+            move |row, progress| row.top(px(delta * (1.0 - progress))),
+        )
+        .into_any_element()
+    } else {
+        row.top(px(0.)).into_any_element()
+    };
+    div()
+        .relative()
+        .w_full()
+        .min_w_0()
+        .flex_shrink_0()
+        .h(px(ROW_H))
+        .child(card)
         .into_any_element()
 }
 

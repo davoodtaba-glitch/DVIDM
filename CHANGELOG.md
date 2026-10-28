@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.89
+
+- **Floating downloads window:** keep an eye on active downloads in a compact always-on-top card. Pause or start each download from the card, expand it to see more, and double-click a row to open it in the main window.
+- **Smooth list motion:** cards slide into place when downloads change position, in both the main window and the floating card.
+- **Toolbar controls:** dedicated buttons start or pause the current list and the selected downloads. The list button shows a pulsing dot while a list is downloading.
+- **Selection fixes:** right-click selects before opening Properties, clicking empty space clears the selection, and starting or pausing several selected downloads now works every time.
+- Rebuilt installer and portable package.
+
 ## 0.5.77
 
 - **Custom list colours:** pick a palette colour or choose any shade with the new colour picker.

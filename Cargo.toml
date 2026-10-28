@@ -1,6 +1,6 @@
 [package]
 name = "dvidm"
-version = "0.5.77"
+version = "0.5.89"
 edition = "2021"
 description = "DV Internet Download Manager"
 

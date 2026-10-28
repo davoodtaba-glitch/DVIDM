@@ -225,6 +225,9 @@ pub(crate) struct Prefs {
     /// Scroll the download list to a newly added download.
     #[serde(default = "def_focus_new")]
     pub(crate) focus_new_download: bool,
+    /// Keep the small floating downloads card open between runs.
+    #[serde(default)]
+    pub(crate) floating_card: bool,
     /// Whether the startup-with-Windows choice has been made. Older settings
     /// files lack it, so those enable autostart once on the next launch.
     #[serde(default)]
@@ -317,6 +320,7 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
                 temp_dir: p.temp_dir,
                 notify_complete: p.notify_complete,
                 focus_new_download: p.focus_new_download,
+                floating_card: p.floating_card,
                 autostart_configured: p.autostart_configured,
                 sort_col: p.sort_col,
                 sort_desc: p.sort_desc,
@@ -354,6 +358,7 @@ pub(crate) fn load_prefs(default_dir: &std::path::Path) -> Prefs {
         temp_dir: String::new(),
         notify_complete: def_notify_complete(),
         focus_new_download: def_focus_new(),
+        floating_card: false,
         autostart_configured: false,
         sort_col: String::new(),
         sort_desc: false,

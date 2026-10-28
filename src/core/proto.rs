@@ -90,6 +90,8 @@ pub(crate) enum Command {
     SetNotifyComplete(bool),
     /// Scroll the download list to a newly added download.
     SetFocusNewDownload(bool),
+    /// Remember whether the floating downloads card is open.
+    SetFloatingCard(bool),
     /// Persist the table sort column (empty = unsorted) and direction.
     SetSort { col: String, desc: bool },
     /// Remember that the user chose the startup-with-Windows option.

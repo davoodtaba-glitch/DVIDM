@@ -19,6 +19,7 @@ mod tests;
 
 mod app;
 mod downloads;
+mod floating;
 mod i18n;
 mod logs;
 mod rtl;

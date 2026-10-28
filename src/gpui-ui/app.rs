@@ -24,7 +24,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable as _, Icon, IconName};
 use gpui_kit::component::WindowExt as _;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -141,6 +141,10 @@ pub(crate) struct MainView {
     pub(crate) filter: Category,
     pub(crate) list_filter: Option<String>,
     pub(crate) selected: HashSet<String>,
+    /// Order of the visible table rows last render, for move animations.
+    pub(crate) row_order: Vec<String>,
+    pub(crate) row_move_from: HashMap<String, usize>,
+    pub(crate) row_move_serial: u64,
     /// Active checkbox drag, if any.
     pub(crate) drag_select: Option<DragSelect>,
     /// "Keep the old file" choice in the redownload warning.
@@ -194,6 +198,8 @@ pub(crate) struct MainView {
     pub(crate) pending_focus: Option<String>,
     /// Current borderless completion toast window.
     pub(crate) toast_window: Option<AnyWindowHandle>,
+    /// Borderless floating downloads card, when open.
+    pub(crate) floating_window: Option<AnyWindowHandle>,
     /// Logo menu (user guide, about, update, exit) is open.
     pub(crate) logo_menu: bool,
     /// Quick language menu on the downloads toolbar.
@@ -313,6 +319,9 @@ impl MainView {
             filter: Category::All,
             list_filter: None,
             selected: HashSet::new(),
+            row_order: Vec::new(),
+            row_move_from: HashMap::new(),
+            row_move_serial: 0,
             drag_select: None,
             redownload_keep: true,
             heartbeat_at: Instant::now(),
@@ -346,6 +355,7 @@ impl MainView {
             notice_serial: 0,
             pending_focus: None,
             toast_window: None,
+            floating_window: None,
             logo_menu: false,
             lang_menu: false,
             update_checking: false,
@@ -371,6 +381,9 @@ impl MainView {
 
         view.watch_inputs(window, cx);
         view.start_folder_loop(folder_rx, cx);
+        if view.svc.prefs().floating_card {
+            view.restore_floating(cx);
+        }
         view.start_tick_loop(cx);
         view.start_update_loop(window, cx);
         view.start_tray_loop(cx);
@@ -850,6 +863,43 @@ impl MainView {
         let has_selection = !self.selected.is_empty();
         let can_move = has_selection && self.sort.is_none();
         let active_here = self.list_active();
+        let selection_active = self.selected.iter().any(|id| {
+            self.svc
+                .view()
+                .snaps
+                .iter()
+                .find(|s| &s.id == id)
+                .is_some_and(|s| matches!(s.status, Status::Connecting | Status::Downloading))
+        });
+        let selection_has_resumable = self.selected.iter().any(|id| {
+            self.svc
+                .view()
+                .snaps
+                .iter()
+                .find(|s| &s.id == id)
+                .is_some_and(|s| matches!(s.status, Status::Paused | Status::Failed))
+        });
+        let selection_ready = !self.selected.is_empty()
+            && (selection_active || selection_has_resumable);
+        let selection_many = self.selected.len() > 1;
+        let selection_label = if selection_active {
+            if selection_many {
+                t(Key::ToolbarPauseMany)
+            } else {
+                t(Key::ToolbarPauseOne)
+            }
+        } else if selection_many {
+            t(Key::ToolbarStartMany)
+        } else {
+            t(Key::ToolbarStartOne)
+        };
+        let selection_tip = if self.selected.is_empty() || !selection_ready {
+            t(Key::ToolbarSelectOneTip)
+        } else if selection_active {
+            t(Key::ToolbarPauseSelectedTip)
+        } else {
+            t(Key::ToolbarStartSelectedTip)
+        };
         // Bulk buttons act on the selection when there is one, otherwise on
         // everything in the current view.
         let move_color = if can_move {
@@ -972,74 +1022,139 @@ impl MainView {
             .mirror()
             .items_center()
             .gap(px(8.))
-            .child(
-                div()
-                    .relative()
-                    .child(
-                        Button::new("start")
-                            .custom(action_style)
-                            .icon(Icon::new(IconName::Play).text_color(pal.ok))
-                            .label(if has_selection {
-                                t(Key::ToolbarStart).to_string()
-                            } else {
-                                t(Key::ToolbarStartList).to_string()
-                            })
-                            .tooltip(if has_selection {
-                                t(Key::ToolbarStartSelectedTip)
-                            } else {
-                                t(Key::ToolbarStartAllTip)
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let ids = this.action_ids();
-                                if ids.is_empty() {
-                                    this.svc.apply(Command::ResumeAll);
-                                } else {
-                                    this.svc.apply(Command::Resume(ids));
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .when(active_here, |wrapper| {
-                        wrapper.child(
-                            div()
-                                .absolute()
-                                .top(px(4.))
-                                .when(crate::rtl::on(), |dot| dot.left(px(7.)))
-                                .when(!crate::rtl::on(), |dot| dot.right(px(7.)))
-                                .size(px(6.))
-                                .rounded_full()
-                                .bg(pal.ok)
-                                .with_animation(
-                                    "start-list-active",
-                                    Animation::new(Duration::from_millis(900)).repeat(),
-                                    |dot, value| {
-                                        let wave = 1.0 - (2.0 * value - 1.0).abs();
-                                        dot.opacity(0.3 + 0.7 * wave)
-                                    },
-                                ),
-                        )
-                    }),
-            )
-            .child(
-                Button::new("pause")
+            .child({
+                let label = if active_here {
+                    t(Key::ToolbarPauseList)
+                } else {
+                    t(Key::ToolbarStartList)
+                };
+                let tip = if active_here {
+                    t(Key::ToolbarPauseAllTip)
+                } else {
+                    t(Key::ToolbarStartAllTip)
+                };
+                Button::new("list-toggle")
                     .custom(action_style)
-                    .icon(Icon::new(IconName::Pause).text_color(pal.warn))
-                    .label(if has_selection {
-                        t(Key::ToolbarPause).to_string()
-                    } else {
-                        t(Key::ToolbarPauseList).to_string()
-                    })
-                    .tooltip(if has_selection {
-                        t(Key::ToolbarPauseSelectedTip)
-                    } else {
-                        t(Key::ToolbarPauseAllTip)
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let ids = this.action_ids();
-                        if ids.is_empty() {
-                            this.svc.apply(Command::PauseAll);
-                        } else {
+                    .accessibility_label(label.clone())
+                    .tooltip(tip)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let ids = crate::downloads::visible(this)
+                            .into_iter()
+                            .map(|s| s.id)
+                            .collect::<Vec<_>>();
+                        if active_here {
                             this.svc.apply(Command::Pause(ids));
+                        } else {
+                            this.svc.apply(Command::Resume(ids));
+                        }
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .mirror()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(
+                                Icon::new(if active_here {
+                                    IconName::Pause
+                                } else {
+                                    IconName::Play
+                                })
+                                .size(px(16.))
+                                .text_color(if active_here { pal.warn } else { pal.ok }),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .mirror()
+                                    .items_center()
+                                    .gap(px(4.))
+                                    .child(div().text_sm().whitespace_nowrap().child(label))
+                                    .child({
+                                        let dot = div()
+                                            .size(px(6.))
+                                            .flex_shrink_0()
+                                            .rounded_full()
+                                            .bg(pal.ok);
+                                        if active_here {
+                                            dot.with_animation(
+                                                "start-list-active",
+                                                Animation::new(Duration::from_millis(900))
+                                                    .repeat(),
+                                                |dot, value| {
+                                                    let wave =
+                                                        1.0 - (2.0 * value - 1.0).abs();
+                                                    dot.opacity(0.3 + 0.7 * wave)
+                                                },
+                                            )
+                                            .into_any_element()
+                                        } else {
+                                            dot.opacity(0.0).into_any_element()
+                                        }
+                                    }),
+                            ),
+                    )
+            })
+            .child(
+                Button::new("single-toggle")
+                    .custom(action_style)
+                    .disabled(!selection_ready)
+                    .icon(
+                        Icon::new(if selection_active {
+                            IconName::Pause
+                        } else {
+                            IconName::Play
+                        })
+                        .text_color(if selection_active {
+                            pal.warn
+                        } else if selection_ready {
+                            pal.ok
+                        } else {
+                            with_alpha(pal.muted, 0.35)
+                        }),
+                    )
+                    .label(selection_label)
+                    .tooltip(selection_tip)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.selected.is_empty() {
+                            return;
+                        }
+                        let ids: Vec<String> = this.selected.iter().cloned().collect();
+                        let active = ids.iter().any(|id| {
+                            this.svc
+                                .view()
+                                .snaps
+                                .iter()
+                                .find(|s| &s.id == id)
+                                .is_some_and(|s| {
+                                    matches!(
+                                        s.status,
+                                        Status::Connecting | Status::Downloading
+                                    )
+                                })
+                        });
+                        if active {
+                            this.svc.apply(Command::Pause(ids));
+                        } else {
+                            let resume: Vec<String> = ids
+                                .into_iter()
+                                .filter(|id| {
+                                    this.svc
+                                        .view()
+                                        .snaps
+                                        .iter()
+                                        .find(|s| &s.id == id)
+                                        .is_some_and(|s| {
+                                            matches!(s.status, Status::Paused | Status::Failed)
+                                        })
+                                })
+                                .collect();
+                            if !resume.is_empty() {
+                                this.svc.apply(Command::Resume(resume));
+                            }
                         }
                         cx.notify();
                     })),
@@ -1569,6 +1684,26 @@ impl MainView {
                     .tooltip(t(Key::StatusBarLogsTip))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_logs_window(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("float-card")
+                    .ghost()
+                    .compact()
+                    .focus_ring(false)
+                    .icon(gpui_kit::assets::IconName::Pin)
+                    .text_color(if self.floating_window.is_some() {
+                        pal.accent
+                    } else {
+                        pal.muted
+                    })
+                    .tooltip(if self.floating_window.is_some() {
+                        t(Key::StatusBarFloatCloseTip)
+                    } else {
+                        t(Key::StatusBarFloatTip)
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_floating(window, cx);
                     })),
             )
             .child(
@@ -2807,6 +2942,82 @@ impl MainView {
     }
 
     /// Open the debug log in its own native window, or focus an existing one.
+    /// Show or hide the always-on-top downloads card.
+    pub(crate) fn toggle_floating(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(handle) = self.floating_window.take() {
+            handle
+                .update(cx, |_, window, _| window.remove_window())
+                .ok();
+            self.svc.apply(Command::SetFloatingCard(false));
+            cx.notify();
+            return;
+        }
+        self.open_floating(cx);
+    }
+
+    fn open_floating(&mut self, cx: &mut Context<Self>) {
+        let app = cx.entity().downgrade();
+        let pal = self.pal;
+        let (x, y) = match cx.primary_display() {
+            Some(display) => {
+                let bounds = display.bounds();
+                (
+                    bounds.origin.x + bounds.size.width - px(400.),
+                    bounds.origin.y + px(80.),
+                )
+            }
+            None => (px(1200.), px(80.)),
+        };
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(x, y),
+                size: size(px(376.), px(128.)),
+            })),
+            titlebar: None,
+            focus: false,
+            show: true,
+            kind: WindowKind::PopUp,
+            is_movable: true,
+            is_resizable: false,
+            is_minimizable: false,
+            window_background: WindowBackgroundAppearance::Transparent,
+            ..Default::default()
+        };
+        cx.spawn(async move |this, cx| {
+            match cx.open_window(options, |window, cx| {
+                cx.new(|cx| crate::floating::FloatingView::new(window, cx, app, pal))
+            }) {
+                Ok(handle) => {
+                    this.update(cx, |this, _| {
+                        this.floating_window = Some(handle.into());
+                        this.svc.apply(Command::SetFloatingCard(true));
+                    })
+                    .ok();
+                }
+                Err(err) => {
+                    crate::core::log::write(format!("floating card failed: {err:#}"));
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Reopen the floating card after a restart when it was left open.
+    fn restore_floating(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(900))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.floating_window.is_none() {
+                    this.open_floating(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub(crate) fn open_logs_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(handle) = self.log_window {
             if handle

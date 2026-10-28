@@ -590,6 +590,10 @@ impl DownloadService {
                 self.prefs.focus_new_download = on;
                 self.prefs.save();
             }
+            Command::SetFloatingCard(on) => {
+                self.prefs.floating_card = on;
+                self.prefs.save();
+            }
             Command::SetProxyMode(raw) => {
                 self.prefs.proxy_mode = super::prefs::normalize_proxy_mode(&raw);
                 self.prefs.save();
