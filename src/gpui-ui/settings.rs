@@ -32,17 +32,13 @@ pub(crate) fn page(
     let ui_lang = prefs.ui_lang.clone();
     let dir = view.svc.save_dir();
 
-    let mut body = div()
-        .id("settings-scroll")
+    let mut content = div()
+        .w_full()
+        .max_w(px(1280.))
+        .mx_auto()
         .flex()
         .flex_col()
-        .flex_1()
-        .min_h_0()
-        .min_w_0()
-        .overflow_y_scroll()
-        .gap(px(12.))
-        .px(px(24.))
-        .py(px(20.))
+        .gap(px(14.))
         .child(
             div()
                 .text_xl()
@@ -53,194 +49,187 @@ pub(crate) fn page(
         )
         .child(div().text_sm().text_color(pal.muted).align_end().child(t(Key::SettingsIntro)));
 
-    // Appearance ---------------------------------------------------------
-    body = body.child(
-        card(t(Key::SettingsAppearance), pal)
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(pal.muted)
-                    .child(t(Key::SettingsThemeHint)),
-            )
-            .child(
-                div()
-                    .mt(px(10.))
-                    .flex()
-                    .flex_row().mirror()
-                    .gap(px(8.))
-                    .child(
-                        Button::new("theme-light")
-                            .when(!prefs.theme_dark, |b| b.primary())
-                            .when(prefs.theme_dark, |b| b.outline())
-                            .icon(IconName::Sun)
-                            .label(t(Key::SettingsThemeLight))
-                            .on_click(cx.listener(|this, _, _, cx| this.set_theme(false, cx))),
-                    )
-                    .child(
-                        Button::new("theme-dark")
-                            .when(prefs.theme_dark, |b| b.primary())
-                            .when(!prefs.theme_dark, |b| b.outline())
-                            .icon(IconName::Moon)
-                            .label(t(Key::SettingsThemeDark))
-                            .on_click(cx.listener(|this, _, _, cx| this.set_theme(true, cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .mt(px(10.))
-                    .flex()
-                    .flex_row()
-                    .mirror()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(t(Key::SettingsLanguage)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .mirror()
-                            .gap(px(6.))
-                            .child(ui_lang_button(
-                                "lang-system",
-                                t(Key::SettingsLangSystem),
-                                "system",
-                                &ui_lang,
-                                pal,
-                                cx,
-                            ))
-                            .child(ui_lang_button(
-                                "lang-en",
-                                t(Key::SettingsLangEnglish),
-                                "en",
-                                &ui_lang,
-                                pal,
-                                cx,
-                            ))
-                            .child(ui_lang_button(
-                                "lang-fa",
-                                t(Key::SettingsLangPersian),
-                                "fa",
-                                &ui_lang,
-                                pal,
-                                cx,
-                            )),
-                    ),
-            ),
-    );
+    // Appearance: theme, language and interface font ---------------------
+    let font_label = if prefs.font.trim().is_empty() {
+        t(Key::SettingsFontSystem).to_string()
+    } else {
+        prefs.font.clone()
+    };
+    let appearance = card(t(Key::SettingsAppearance), pal)
+        .child(
+            div()
+                .w_full()
+                .text_sm()
+                .text_color(pal.muted)
+                .child(t(Key::SettingsThemeHint)),
+        )
+        .child(
+            div()
+                .mt(px(10.))
+                .flex()
+                .flex_row().mirror()
+                .gap(px(8.))
+                .child(
+                    Button::new("theme-light")
+                        .when(!prefs.theme_dark, |b| b.primary())
+                        .when(prefs.theme_dark, |b| b.outline())
+                        .icon(IconName::Sun)
+                        .label(t(Key::SettingsThemeLight))
+                        .on_click(cx.listener(|this, _, _, cx| this.set_theme(false, cx))),
+                )
+                .child(
+                    Button::new("theme-dark")
+                        .when(prefs.theme_dark, |b| b.primary())
+                        .when(!prefs.theme_dark, |b| b.outline())
+                        .icon(IconName::Moon)
+                        .label(t(Key::SettingsThemeDark))
+                        .on_click(cx.listener(|this, _, _, cx| this.set_theme(true, cx))),
+                ),
+        )
+        .child(divider(pal))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .mirror()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(pal.text)
+                        .child(t(Key::SettingsLanguage)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .mirror()
+                        .gap(px(6.))
+                        .child(ui_lang_button(
+                            "lang-system",
+                            t(Key::SettingsLangSystem),
+                            "system",
+                            &ui_lang,
+                            pal,
+                            cx,
+                        ))
+                        .child(ui_lang_button(
+                            "lang-en",
+                            t(Key::SettingsLangEnglish),
+                            "en",
+                            &ui_lang,
+                            pal,
+                            cx,
+                        ))
+                        .child(ui_lang_button(
+                            "lang-fa",
+                            t(Key::SettingsLangPersian),
+                            "fa",
+                            &ui_lang,
+                            pal,
+                            cx,
+                        )),
+                ),
+        )
+        .child(divider(pal))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .mirror()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(pal.text)
+                        .child(t(Key::SettingsFont)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .px(px(10.))
+                        .py(px(6.))
+                        .rounded(px(7.))
+                        .bg(pal.bg)
+                        .border_1()
+                        .border_color(pal.line)
+                        .text_sm()
+                        .text_color(pal.text)
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(font_label),
+                )
+                .child(
+                    Button::new("font-change")
+                        .outline()
+                        .label(t(Key::SettingsFontChange))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.font_dialog(window, cx);
+                        })),
+                ),
+        )
+        .child(
+            div()
+                .mt(px(6.))
+                .w_full()
+                .text_xs()
+                .text_color(pal.muted)
+                .child(t(Key::SettingsFontHint)),
+        );
 
-    // Startup ------------------------------------------------------------
+    // Behavior: startup, notifications and list focus --------------------
     let autostart = crate::core::sys::autostart_enabled();
-    body = body.child(
-        card(t(Key::SettingsStartup), pal)
-            .child(
-                div()
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(
-                        Switch::new("autostart")
-                            .checked(autostart)
-                            .on_change(cx.listener(|this, on: &bool, _, cx| {
-                                match crate::core::sys::set_autostart(*on) {
-                                    Ok(()) => {
-                                        this.svc.apply(Command::AutostartConfigured);
-                                    }
-                                    Err(err) => {
-                                        this.show_notice(crate::i18n::error(&err), true, cx);
-                                    }
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(t(Key::SettingsAutostart)),
-                    ),
-            )
-            .child(
-                div()
-                    .mt(px(6.))
-                    .text_xs()
-                    .text_color(pal.muted)
-                    .child(t(Key::SettingsAutostartHint)),
-            ),
-    );
-
-    // Notifications ------------------------------------------------------
     let notify = prefs.notify_complete;
-    body = body.child(
-        card(t(Key::SettingsNotifications), pal)
-            .child(
-                div()
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(
-                        Switch::new("notify-complete")
-                            .checked(notify)
-                            .on_change(cx.listener(|this, on: &bool, _, cx| {
-                                this.svc.apply(Command::SetNotifyComplete(*on));
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(t(Key::SettingsNotifyComplete)),
-                    ),
-            )
-            .child(
-                div()
-                    .mt(px(6.))
-                    .text_xs()
-                    .text_color(pal.muted)
-                    .child(t(Key::SettingsNotifyHint)),
-            ),
-    );
-
-    // Behavior -----------------------------------------------------------
     let focus_new = prefs.focus_new_download;
-    body = body.child(
-        card(t(Key::SettingsBehavior), pal)
-            .child(
-                div()
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(
-                        Switch::new("focus-new")
-                            .checked(focus_new)
-                            .on_change(cx.listener(|this, on: &bool, _, cx| {
-                                this.svc.apply(Command::SetFocusNewDownload(*on));
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(t(Key::SettingsFocusNew)),
-                    ),
-            )
-            .child(
-                div()
-                    .mt(px(6.))
-                    .text_xs()
-                    .text_color(pal.muted)
-                    .child(t(Key::SettingsFocusHint)),
-            ),
-    );
+    let behavior = card(t(Key::SettingsBehavior), pal)
+        .child(toggle_row(
+            Switch::new("autostart")
+                .checked(autostart)
+                .on_change(cx.listener(|this, on: &bool, _, cx| {
+                    match crate::core::sys::set_autostart(*on) {
+                        Ok(()) => {
+                            this.svc.apply(Command::AutostartConfigured);
+                        }
+                        Err(err) => {
+                            this.show_notice(crate::i18n::error(&err), true, cx);
+                        }
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+            t(Key::SettingsAutostart),
+            t(Key::SettingsAutostartHint),
+            pal,
+        ))
+        .child(divider(pal))
+        .child(toggle_row(
+            Switch::new("notify-complete")
+                .checked(notify)
+                .on_change(cx.listener(|this, on: &bool, _, cx| {
+                    this.svc.apply(Command::SetNotifyComplete(*on));
+                    cx.notify();
+                }))
+                .into_any_element(),
+            t(Key::SettingsNotifyComplete),
+            t(Key::SettingsNotifyHint),
+            pal,
+        ))
+        .child(divider(pal))
+        .child(toggle_row(
+            Switch::new("focus-new")
+                .checked(focus_new)
+                .on_change(cx.listener(|this, on: &bool, _, cx| {
+                    this.svc.apply(Command::SetFocusNewDownload(*on));
+                    cx.notify();
+                }))
+                .into_any_element(),
+            t(Key::SettingsFocusNew),
+            t(Key::SettingsFocusHint),
+            pal,
+        ));
 
     // Browser shortcut ----------------------------------------------------
     let modifier = prefs.browser_modifier.clone();
@@ -254,148 +243,121 @@ pub(crate) fn page(
         "alt_shift" => t(Key::ShortcutAltShiftClick),
         _ => t(Key::ShortcutBothClick),
     };
-    body = body.child(
-        card(t(Key::SettingsBrowserShortcut), pal)
-            .child(div().text_sm().text_color(pal.muted).child(tf(
-                Key::SettingsBrowserHint,
-                &[shortcut_label.as_str()],
-            )))
-            .child(
-                div()
-                    .mt(px(8.))
-                    .flex()
-                    .flex_row().mirror()
-                    .flex_wrap()
-                    .gap(px(6.))
-                    .child(browser_modifier_button(
-                        "ctrl-click",
-                        t(Key::ModCtrl),
-                        "ctrl",
-                        &modifier,
-                        pal,
-                        cx,
-                    ))
-                    .child(browser_modifier_button(
-                        "alt-click",
-                        t(Key::ModAlt),
-                        "alt",
-                        &modifier,
-                        pal,
-                        cx,
-                    ))
-                    .child(browser_modifier_button(
-                        "shift-click",
-                        t(Key::ModShift),
-                        "shift",
-                        &modifier,
-                        pal,
-                        cx,
-                    ))
-                    .child(browser_modifier_button(
-                        "insert-click",
-                        t(Key::ModInsert),
-                        "insert",
-                        &modifier,
-                        pal,
-                        cx,
-                    ))
-                    .child(browser_modifier_button(
-                        "ctrl-alt-click",
-                        t(Key::ModCtrlAlt),
-                        "ctrl_alt",
-                        &modifier,
-                        pal,
-                        cx,
-                    ))
-                    .child(browser_modifier_button(
-                        "ctrl-shift-click",
-                        t(Key::ModCtrlShift),
-                        "ctrl_shift",
-                        &modifier,
-                        pal,
-                        cx,
-                    ))
-                    .child(browser_modifier_button(
-                        "alt-shift-click",
-                        t(Key::ModAltShift),
-                        "alt_shift",
-                        &modifier,
-                        pal,
-                        cx,
-                    ))
-                    .child(browser_modifier_button(
-                        "both-click",
-                        t(Key::ModBoth),
-                        "both",
-                        &modifier,
-                        pal,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .mt(px(10.))
-                    .flex()
-                    .flex_row().mirror()
-                    .items_start()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(
-                                Textarea::new(&view.formats_input)
-                                    .w_full()
-                                    .h(px(96.)),
-                            ),
-                    )
-                    .child(
-                        Button::new("formats-apply")
-                            .outline()
-                            .label(t(Key::CommonApply))
-                            .tooltip(t(Key::SettingsFormatsApplyTip))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.apply_direct_formats(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("formats-reset")
-                            .outline()
-                            .label(t(Key::CommonReset))
-                            .tooltip(t(Key::SettingsFormatsResetTip))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.svc.apply(Command::SetDirectFormats(String::new()));
-                                this.sync_formats_input(window, cx);
-                                cx.notify();
-                            })),
-                    ),
-            )
-                    .child(
-                        div()
-                            .mt(px(6.))
-                            .w_full()
-                            .text_xs()
-                            .text_color(pal.muted)
-                            .child(tf(
-                                Key::SettingsFormatsDefaults,
-                                &[&crate::core::prefs::DEFAULT_DIRECT_FORMATS
-                                    .chunks(8)
-                                    .map(|c| c.join(", "))
-                                    .collect::<Vec<_>>()
-                                    .join(",\n")],
-                            )),
-                    )
-                    .child(
-                        div()
-                            .mt(px(4.))
-                            .w_full()
-                            .text_xs()
-                            .text_color(pal.muted)
-                            .child(tf(
-                                Key::SettingsPrefsPath,
-                                &[&crate::core::prefs::prefs_path().display().to_string()],
-                            )),
-                    ),
-    );
+    let browser = card(t(Key::SettingsBrowserShortcut), pal)
+        .child(div().w_full().text_sm().text_color(pal.muted).child(tf(
+            Key::SettingsBrowserHint,
+            &[shortcut_label.as_str()],
+        )))
+        .child(
+            div()
+                .mt(px(8.))
+                .flex()
+                .flex_row().mirror()
+                .flex_wrap()
+                .gap(px(6.))
+                .child(browser_modifier_button(
+                    "ctrl-click",
+                    t(Key::ModCtrl),
+                    "ctrl",
+                    &modifier,
+                    pal,
+                    cx,
+                ))
+                .child(browser_modifier_button(
+                    "alt-click",
+                    t(Key::ModAlt),
+                    "alt",
+                    &modifier,
+                    pal,
+                    cx,
+                ))
+                .child(browser_modifier_button(
+                    "shift-click",
+                    t(Key::ModShift),
+                    "shift",
+                    &modifier,
+                    pal,
+                    cx,
+                ))
+                .child(browser_modifier_button(
+                    "insert-click",
+                    t(Key::ModInsert),
+                    "insert",
+                    &modifier,
+                    pal,
+                    cx,
+                ))
+                .child(browser_modifier_button(
+                    "ctrl-alt-click",
+                    t(Key::ModCtrlAlt),
+                    "ctrl_alt",
+                    &modifier,
+                    pal,
+                    cx,
+                ))
+                .child(browser_modifier_button(
+                    "ctrl-shift-click",
+                    t(Key::ModCtrlShift),
+                    "ctrl_shift",
+                    &modifier,
+                    pal,
+                    cx,
+                ))
+                .child(browser_modifier_button(
+                    "alt-shift-click",
+                    t(Key::ModAltShift),
+                    "alt_shift",
+                    &modifier,
+                    pal,
+                    cx,
+                ))
+                .child(browser_modifier_button(
+                    "both-click",
+                    t(Key::ModBoth),
+                    "both",
+                    &modifier,
+                    pal,
+                    cx,
+                )),
+        )
+        .child(divider(pal))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(
+                    div()
+                        .w_full()
+                        .child(Textarea::new(&view.formats_input).w_full().h(px(96.))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row().mirror()
+                        .gap(px(6.))
+                        .child(
+                            Button::new("formats-apply")
+                                .outline()
+                                .label(t(Key::CommonApply))
+                                .tooltip(t(Key::SettingsFormatsApplyTip))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.apply_direct_formats(cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("formats-reset")
+                                .outline()
+                                .label(t(Key::CommonReset))
+                                .tooltip(t(Key::SettingsFormatsResetTip))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.svc.apply(Command::SetDirectFormats(String::new()));
+                                    this.sync_formats_input(window, cx);
+                                    cx.notify();
+                                })),
+                        ),
+                ),
+        );
 
     // Proxy / SOCKS ------------------------------------------------------
     let proxy_mode = prefs.proxy_mode.clone();
@@ -413,190 +375,207 @@ pub(crate) fn page(
         None
     };
     let (ph, ps, pf) = (prefs.proxy_http, prefs.proxy_https, prefs.proxy_ftp);
-    body = body.child(
-        card(t(Key::SettingsProxy), pal)
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(pal.muted)
-                    .child(t(Key::SettingsProxyHint)),
-            )
-            .child(
-                div()
-                    .mt(px(8.))
-                    .flex()
-                    .flex_row().mirror()
-                    .gap(px(6.))
-                    .child(proxy_mode_button("proxy-none", t(Key::SettingsProxyNone), "none", &proxy_mode, cx))
-                    .child(proxy_mode_button("proxy-system", t(Key::SettingsProxySystem), "system", &proxy_mode, cx))
-                    .child(proxy_mode_button("proxy-manual", t(Key::SettingsProxyManual), "manual", &proxy_mode, cx)),
-            )
-            .when(system_note.is_some(), |card| {
-                let (text, color) = system_note.clone().unwrap();
-                card.child(
+    let proxy = card(t(Key::SettingsProxy), pal)
+        .child(
+            div()
+                .w_full()
+                .text_sm()
+                .text_color(pal.muted)
+                .child(t(Key::SettingsProxyHint)),
+        )
+        .child(
+            div()
+                .mt(px(10.))
+                .flex()
+                .flex_row().mirror()
+                .items_center()
+                .justify_between()
+                .gap(px(10.))
+                .child(
                     div()
-                        .mt(px(6.))
-                        .text_xs()
-                        .text_color(color)
-                        .child(text),
+                        .flex()
+                        .flex_row().mirror()
+                        .gap(px(6.))
+                        .child(proxy_mode_button("proxy-none", t(Key::SettingsProxyNone), "none", &proxy_mode, cx))
+                        .child(proxy_mode_button("proxy-system", t(Key::SettingsProxySystem), "system", &proxy_mode, cx))
+                        .child(proxy_mode_button("proxy-manual", t(Key::SettingsProxyManual), "manual", &proxy_mode, cx)),
                 )
-            })
-            .child(
+                .child(
+                    div()
+                        .flex()
+                        .flex_row().mirror()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(pal.muted)
+                                .child(t(Key::SettingsProxyType)),
+                        )
+                        .child(proxy_kind_button("proxy-kind-http", t(Key::SettingsProxyHttp), "http", &proxy_kind, cx))
+                        .child(proxy_kind_button(
+                            "proxy-kind-socks",
+                            t(Key::SettingsProxySocks5),
+                            "socks5",
+                            &proxy_kind,
+                            cx,
+                        )),
+                ),
+        )
+        .when(system_note.is_some(), |card| {
+            let (text, color) = system_note.clone().unwrap();
+            card.child(
                 div()
-                    .mt(px(8.))
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(pal.muted)
-                            .child(t(Key::SettingsProxyType)),
-                    )
-                    .child(proxy_kind_button("proxy-kind-http", t(Key::SettingsProxyHttp), "http", &proxy_kind, cx))
-                    .child(proxy_kind_button(
-                        "proxy-kind-socks",
-                        t(Key::SettingsProxySocks5),
-                        "socks5",
-                        &proxy_kind,
-                        cx,
-                    )),
+                    .mt(px(6.))
+                    .text_xs()
+                    .text_color(color)
+                    .child(text),
             )
-            .child(
-                div()
-                    .mt(px(10.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(pal.muted)
-                            .child(t(Key::SettingsProxyAddressHint)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row().mirror()
-                            .gap(px(6.))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(Input::new(&view.proxy_host_input).disabled(!manual_proxy)),
-                            )
-                            .child(
-                                div()
-                                    .w(px(90.))
-                                    .child(Input::new(&view.proxy_port_input).disabled(!manual_proxy)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row().mirror()
-                            .gap(px(6.))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(Input::new(&view.proxy_user_input).disabled(!manual_proxy)),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(Input::new(&view.proxy_pass_input).disabled(!manual_proxy)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row().mirror()
-                            .items_center()
-                            .gap(px(14.))
-                            .child(
-                                Checkbox::new("proxy-http")
-                                    .checked(ph)
-                                    .label(t(Key::SettingsProxyProtoHttp))
-                                    .on_click(cx.listener(move |this, on, _, cx| {
-                                        this.svc.apply(Command::SetProxyProtocols {
-                                            http: *on,
-                                            https: ps,
-                                            ftp: pf,
-                                        });
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new("proxy-https")
-                                    .checked(ps)
-                                    .label(t(Key::SettingsProxyProtoHttps))
-                                    .on_click(cx.listener(move |this, on, _, cx| {
-                                        this.svc.apply(Command::SetProxyProtocols {
-                                            http: ph,
-                                            https: *on,
-                                            ftp: pf,
-                                        });
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new("proxy-ftp")
-                                    .checked(pf)
-                                    .label(t(Key::SettingsProxyProtoFtp))
-                                    .on_click(cx.listener(move |this, on, _, cx| {
-                                        this.svc.apply(Command::SetProxyProtocols {
-                                            http: ph,
-                                            https: ps,
-                                            ftp: *on,
-                                        });
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("proxy-apply")
-                                    .outline()
-                                    .label(t(Key::CommonApply))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        let host = this.proxy_host_input.read(cx).value().to_string();
-                                        let port = this
-                                            .proxy_port_input
-                                            .read(cx)
-                                            .value()
-                                            .trim()
-                                            .to_string();
-                                        let port = crate::text::from_fa_digits(&port)
-                                            .parse::<u16>()
-                                            .unwrap_or(8080)
-                                            .max(1);
-                                        let user = this.proxy_user_input.read(cx).value().to_string();
-                                        let pass = this.proxy_pass_input.read(cx).value().to_string();
-                                        this.svc.apply(Command::SetProxyFields {
-                                            host,
-                                            port,
-                                            user,
-                                            pass,
-                                        });
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(
-                        Checkbox::new("proxy-browser")
-                            .checked(prefs.proxy_from_browser)
-                            .label(t(Key::SettingsProxyFromBrowser))
-                            .on_click(cx.listener(|this, on, _, cx| {
-                                this.svc.apply(Command::SetProxyFromBrowser(*on));
-                                cx.notify();
-                            })),
-                    ),
-            ),
-    );
+        })
+        .child(
+            div()
+                .mt(px(10.))
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(pal.muted)
+                        .child(t(Key::SettingsProxyAddressHint)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row().mirror()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Input::new(&view.proxy_host_input).disabled(!manual_proxy)),
+                        )
+                        .child(
+                            div()
+                                .w(px(90.))
+                                .child(Input::new(&view.proxy_port_input).disabled(!manual_proxy)),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row().mirror()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Input::new(&view.proxy_user_input).disabled(!manual_proxy)),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Input::new(&view.proxy_pass_input).disabled(!manual_proxy)),
+                        ),
+                ),
+        )
+        .child(divider(pal))
+        .child(
+            div()
+                .flex()
+                .flex_row().mirror()
+                .flex_wrap()
+                .items_center()
+                .gap(px(14.))
+                .child(
+                    Checkbox::new("proxy-http")
+                        .checked(ph)
+                        .label(t(Key::SettingsProxyProtoHttp))
+                        .on_click(cx.listener(move |this, on, _, cx| {
+                            this.svc.apply(Command::SetProxyProtocols {
+                                http: *on,
+                                https: ps,
+                                ftp: pf,
+                            });
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Checkbox::new("proxy-https")
+                        .checked(ps)
+                        .label(t(Key::SettingsProxyProtoHttps))
+                        .on_click(cx.listener(move |this, on, _, cx| {
+                            this.svc.apply(Command::SetProxyProtocols {
+                                http: ph,
+                                https: *on,
+                                ftp: pf,
+                            });
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Checkbox::new("proxy-ftp")
+                        .checked(pf)
+                        .label(t(Key::SettingsProxyProtoFtp))
+                        .on_click(cx.listener(move |this, on, _, cx| {
+                            this.svc.apply(Command::SetProxyProtocols {
+                                http: ph,
+                                https: ps,
+                                ftp: *on,
+                            });
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("proxy-apply")
+                        .outline()
+                        .label(t(Key::CommonApply))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let host = this.proxy_host_input.read(cx).value().to_string();
+                            let port = this
+                                .proxy_port_input
+                                .read(cx)
+                                .value()
+                                .trim()
+                                .to_string();
+                            let port = crate::text::from_fa_digits(&port)
+                                .parse::<u16>()
+                                .unwrap_or(8080)
+                                .max(1);
+                            let user = this.proxy_user_input.read(cx).value().to_string();
+                            let pass = this.proxy_pass_input.read(cx).value().to_string();
+                            this.svc.apply(Command::SetProxyFields {
+                                host,
+                                port,
+                                user,
+                                pass,
+                            });
+                            cx.notify();
+                        })),
+                ),
+        )
+        .child(
+            Checkbox::new("proxy-browser")
+                .checked(prefs.proxy_from_browser)
+                .label(t(Key::SettingsProxyFromBrowser))
+                .on_click(cx.listener(|this, on, _, cx| {
+                    this.svc.apply(Command::SetProxyFromBrowser(*on));
+                    cx.notify();
+                })),
+        );
 
     // Destination --------------------------------------------------------
-    body = body.child(
-        card(t(Key::SettingsSaveTo), pal)
+    let save = card(t(Key::SettingsSaveTo), pal)
             .child(
                 div()
+                    .w_full()
+                    .text_sm()
+                    .text_color(pal.muted)
+                    .child(t(Key::SettingsSaveHint)),
+            )
+            .child(
+                div()
+                    .mt(px(8.))
+                    .w_full()
+                    .min_w_0()
                     .px(px(10.))
                     .py(px(7.))
                     .rounded(px(7.))
@@ -605,6 +584,8 @@ pub(crate) fn page(
                     .border_color(pal.line)
                     .text_sm()
                     .text_color(pal.text)
+                    .overflow_hidden()
+                    .text_ellipsis()
                     .child(dir.to_string_lossy().into_owned()),
             )
             .child(
@@ -641,20 +622,20 @@ pub(crate) fn page(
                         move |_, _, cx: &mut App| {
                             crate::app::open_in_background(dir.clone(), cx);
                         }
-                    })),
-            ),
-    );
+                    })));
+
 
     // Temporary files ----------------------------------------------------
     let temp = view.svc.temp_dir();
-    body = body.child(
-        card(t(Key::SettingsTempFiles), pal)
-            .child(div().text_sm().text_color(pal.muted).child(
+    let temp_card = card(t(Key::SettingsTempFiles), pal)
+            .child(div().w_full().text_sm().text_color(pal.muted).child(
                 t(Key::SettingsTempHint),
             ))
             .child(
                 div()
                     .mt(px(8.))
+                    .w_full()
+                    .min_w_0()
                     .px(px(10.))
                     .py(px(7.))
                     .rounded(px(7.))
@@ -663,6 +644,8 @@ pub(crate) fn page(
                     .border_color(pal.line)
                     .text_sm()
                     .text_color(pal.text)
+                    .overflow_hidden()
+                    .text_ellipsis()
                     .child(temp.to_string_lossy().into_owned()),
             )
             .child(
@@ -698,88 +681,172 @@ pub(crate) fn page(
                         move |_, _, cx: &mut App| {
                             crate::app::open_in_background(temp.clone(), cx);
                         }
-                    })),
-            ),
-    );
+                    })));
 
-    // Connections --------------------------------------------------------
+    // Connections and retry ---------------------------------------------
     let conns = prefs.conns;
-    body = body.child(
-        card(t(Key::SettingsConnections), pal)
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(pal.muted)
-                    .child(tf(Key::SettingsConnsLabel, &[&ltr_isolate(&conns.to_string())])),
-            )
-            .child(
-                div()
-                    .mt(px(10.))
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        Button::new("conns-minus")
-                            .outline()
-                            .icon(IconName::Minus)
-                            .disabled(conns <= 1)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let n = this.svc.prefs().conns.saturating_sub(1).max(1);
-                                this.svc.apply(Command::SetConnections(n));
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .w(px(36.))
-                            .text_center()
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(conns.to_string()),
-                    )
-                    .child(
-                        Button::new("conns-plus")
-                            .outline()
-                            .icon(IconName::Plus)
-                            .disabled(conns >= 32)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let n = this.svc.prefs().conns.saturating_add(1).min(32);
-                                this.svc.apply(Command::SetConnections(n));
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .margin_start(px(8.))
-                            .flex()
-                            .flex_row().mirror()
-                            .gap(px(4.))
-                            .children([1u32, 4, 8, 16, 32].into_iter().map(|n| {
-                                let weak = cx.entity().downgrade();
-                                Button::new(ElementId::Name(format!("conns-{n}").into()))
-                                    .outline()
-                                    .label(n.to_string())
-                                    .on_click(move |_, _, cx: &mut App| {
-                                        weak.update(cx, |this, cx| {
-                                            this.svc.apply(Command::SetConnections(n));
-                                            cx.notify();
-                                        })
-                                        .ok();
+    let retry_parts = prefs.retry_parts;
+    let retry_after = prefs.retry_after;
+    let performance = card(t(Key::SettingsConnections), pal)
+        .child(
+            div()
+                .text_sm()
+                .text_color(pal.muted)
+                .child(tf(Key::SettingsConnsLabel, &[&ltr_isolate(&conns.to_string())])),
+        )
+        .child(
+            div()
+                .mt(px(10.))
+                .flex()
+                .flex_row().mirror()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    Button::new("conns-minus")
+                        .outline()
+                        .icon(IconName::Minus)
+                        .disabled(conns <= 1)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let n = this.svc.prefs().conns.saturating_sub(1).max(1);
+                            this.svc.apply(Command::SetConnections(n));
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    div()
+                        .w(px(36.))
+                        .text_center()
+                        .text_sm()
+                        .text_color(pal.text)
+                        .child(conns.to_string()),
+                )
+                .child(
+                    Button::new("conns-plus")
+                        .outline()
+                        .icon(IconName::Plus)
+                        .disabled(conns >= 32)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let n = this.svc.prefs().conns.saturating_add(1).min(32);
+                            this.svc.apply(Command::SetConnections(n));
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    div()
+                        .margin_start(px(8.))
+                        .flex()
+                        .flex_row().mirror()
+                        .gap(px(4.))
+                        .children([1u32, 4, 8, 16, 32].into_iter().map(|n| {
+                            let weak = cx.entity().downgrade();
+                            Button::new(ElementId::Name(format!("conns-{n}").into()))
+                                .outline()
+                                .label(n.to_string())
+                                .on_click(move |_, _, cx: &mut App| {
+                                    weak.update(cx, |this, cx| {
+                                        this.svc.apply(Command::SetConnections(n));
+                                        cx.notify();
                                     })
-                            })),
+                                    .ok();
+                                })
+                        })),
+                ),
+        )
+        .child(divider(pal))
+        .child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .text_color(pal.text)
+                .child(t(Key::SettingsRetry)),
+        )
+        .child(
+            div()
+                .mt(px(8.))
+                .flex()
+                .flex_row().mirror()
+                .items_center()
+                .gap(px(10.))
+                .child(
+                    Switch::new("retry-parts").checked(retry_parts).on_change(
+                        cx.listener(|this, on: &bool, _, cx| {
+                            let after = this.svc.prefs().retry_after;
+                            this.svc.apply(Command::SetRetry {
+                                parts: *on,
+                                after_secs: after,
+                            });
+                            cx.notify();
+                        }),
                     ),
-            ),
-    );
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(pal.text)
+                        .child(t(Key::SettingsRetryParts)),
+                ),
+        )
+        .child(
+            div()
+                .mt(px(8.))
+                .flex()
+                .flex_row().mirror()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    Button::new("retry-minus")
+                        .outline()
+                        .icon(IconName::Minus)
+                        .disabled(retry_after <= 3)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let after = this.svc.prefs().retry_after.saturating_sub(5).max(3);
+                            let parts = this.svc.prefs().retry_parts;
+                            this.svc.apply(Command::SetRetry {
+                                parts,
+                                after_secs: after,
+                            });
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    div()
+                        .w(px(52.))
+                        .text_center()
+                        .text_sm()
+                        .text_color(pal.text)
+                        .child(tf(Key::SettingsRetryWaitValue, &[&ltr_isolate(&retry_after.to_string())])),
+                )
+                .child(
+                    Button::new("retry-plus")
+                        .outline()
+                        .icon(IconName::Plus)
+                        .disabled(retry_after >= 300)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let after = this.svc.prefs().retry_after.saturating_add(5).min(300);
+                            let parts = this.svc.prefs().retry_parts;
+                            this.svc.apply(Command::SetRetry {
+                                parts,
+                                after_secs: after,
+                            });
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(pal.muted)
+                        .child(t(Key::SettingsRetryWait)),
+                ),
+        );
 
     // Speed limit --------------------------------------------------------
     let limit = prefs.limit_kbps;
     // Presets and the typed field are two modes, never both at once.
     let custom = view.limit_custom;
-    body = body.child(
-        card(t(Key::SettingsSpeedLimit), pal)
+    let speed = card(t(Key::SettingsSpeedLimit), pal)
             .child(
                 div()
+                    .w_full()
                     .text_sm()
                     .text_color(pal.muted)
                     .child(t(Key::SettingsSpeedHint)),
@@ -906,139 +973,67 @@ pub(crate) fn page(
                                 tf(Key::SettingsPresetLimitStatus, &[&ltr_isolate(&fmt_speed(limit * 1024))])
                             }),
                     )
-            ),
-    );
+            );
 
-    // Retry --------------------------------------------------------------
-    let retry_parts = prefs.retry_parts;
-    let retry_after = prefs.retry_after;
-    body = body.child(
-        card(t(Key::SettingsRetry), pal)
-            .child(
-                div()
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(
-                        Switch::new("retry-parts").checked(retry_parts).on_change(
-                            cx.listener(|this, on: &bool, _, cx| {
-                                let after = this.svc.prefs().retry_after;
-                                this.svc.apply(Command::SetRetry {
-                                    parts: *on,
-                                    after_secs: after,
-                                });
-                                cx.notify();
-                            }),
-                        ),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(t(Key::SettingsRetryParts)),
-                    ),
-            )
-            .child(
-                div()
-                    .mt(px(10.))
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        Button::new("retry-minus")
-                            .outline()
-                            .icon(IconName::Minus)
-                            .disabled(retry_after <= 3)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let after = this.svc.prefs().retry_after.saturating_sub(5).max(3);
-                                let parts = this.svc.prefs().retry_parts;
-                                this.svc.apply(Command::SetRetry {
-                                    parts,
-                                    after_secs: after,
-                                });
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .w(px(52.))
-                            .text_center()
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(tf(Key::SettingsRetryWaitValue, &[&ltr_isolate(&retry_after.to_string())])),
-                    )
-                    .child(
-                        Button::new("retry-plus")
-                            .outline()
-                            .icon(IconName::Plus)
-                            .disabled(retry_after >= 300)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let after = this.svc.prefs().retry_after.saturating_add(5).min(300);
-                                let parts = this.svc.prefs().retry_parts;
-                                this.svc.apply(Command::SetRetry {
-                                    parts,
-                                    after_secs: after,
-                                });
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(pal.muted)
-                            .child(t(Key::SettingsRetryWait)),
-                    ),
-            ),
-    );
+    // Long format list and the settings path sit below the pair so the
+    // browser and proxy cards keep the same height. The list splits into two
+    // even lines instead of one line per eight entries.
+    let formats = crate::core::prefs::DEFAULT_DIRECT_FORMATS;
+    let formats_per_line = formats.len().div_ceil(2);
+    let browser_note = div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(4.))
+        .align_end()
+        .child(
+            div()
+                .w_full()
+                .text_xs()
+                .text_color(pal.muted)
+                .child(tf(
+                    Key::SettingsFormatsDefaults,
+                    &[&formats
+                        .chunks(formats_per_line)
+                        .map(|c| c.join(", "))
+                        .collect::<Vec<_>>()
+                        .join(",\n")],
+                )),
+        )
+        .child(
+            div()
+                .w_full()
+                .text_xs()
+                .text_color(pal.muted)
+                .child(tf(
+                    Key::SettingsPrefsPath,
+                    &[&crate::core::prefs::prefs_path().display().to_string()],
+                )),
+        );
 
-    // Interface font -----------------------------------------------------
-    let font = prefs.font.clone();
-    let font_label = if font.trim().is_empty() {
-        t(Key::SettingsFontSystem).to_string()
-    } else {
-        font.clone()
-    };
-    body = body.child(
-        card(t(Key::SettingsFont), pal)
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(pal.muted)
-                    .child(t(Key::SettingsFontHint)),
-            )
-            .child(
-                div()
-                    .mt(px(10.))
-                    .flex()
-                    .flex_row().mirror()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .px(px(10.))
-                            .py(px(7.))
-                            .rounded(px(7.))
-                            .bg(pal.bg)
-                            .border_1()
-                            .border_color(pal.line)
-                            .text_sm()
-                            .text_color(pal.text)
-                            .child(font_label),
-                    )
-                    .child(
-                        Button::new("font-change")
-                            .outline()
-                            .label(t(Key::SettingsFontChange))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.font_dialog(window, cx);
-                            })),
-                    ),
-            ),
-    );
+    let content = content
+        .child(group_label(t(Key::SettingsGroupGeneral), pal))
+        .child(grid(vec![appearance, behavior]))
+        .child(group_label(t(Key::SettingsGroupDownloads), pal))
+        .child(grid(vec![save, temp_card]))
+        .child(grid(vec![performance, speed]))
+        .child(group_label(t(Key::SettingsGroupBrowserNetwork), pal))
+        .child(grid(vec![browser, proxy]))
+        .child(browser_note);
 
-    body.into_any_element()
+    div()
+        .id("settings-scroll")
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .min_w_0()
+        .overflow_y_scroll()
+        .px(px(24.))
+        .py(px(20.))
+        .child(content)
+        .into_any_element()
+
 }
 
 impl MainView {
@@ -1214,7 +1209,7 @@ fn card(title: impl AsRef<str>, pal: Palette) -> Div {
     div()
         .flex()
         .flex_col()
-        .w_full()
+        .min_w_0()
         .p(px(16.))
         .rounded(px(12.))
         .bg(pal.card)
@@ -1229,6 +1224,64 @@ fn card(title: impl AsRef<str>, pal: Palette) -> Div {
                 .text_color(pal.text)
                 .align_end()
                 .child(title.as_ref().to_string()),
+        )
+}
+
+/// Two cards per row on wide windows; they share the line evenly and wrap
+/// to a single column on narrow ones.
+fn grid(cards: Vec<Div>) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_row().mirror()
+        .flex_wrap()
+        .items_stretch()
+        .gap(px(14.))
+        .children(
+            cards
+                .into_iter()
+                .map(|card| card.flex_basis(px(0.)).flex_grow(1.).min_w(px(400.))),
+        )
+}
+
+/// Small muted heading that introduces a group of cards.
+fn group_label(title: String, pal: Palette) -> Div {
+    div()
+        .mt(px(6.))
+        .text_xs()
+        .font_semibold()
+        .text_color(pal.muted)
+        .align_end()
+        .child(title)
+}
+
+fn divider(pal: Palette) -> Div {
+    div().w_full().h(px(1.)).my(px(12.)).bg(pal.line)
+}
+
+/// One setting row: switch on the start edge, label and hint beside it.
+fn toggle_row(
+    switch: AnyElement,
+    label: String,
+    hint: String,
+    pal: Palette,
+) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_row().mirror()
+        .items_start()
+        .gap(px(10.))
+        .child(switch)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(div().text_sm().text_color(pal.text).child(label))
+                .child(div().text_xs().text_color(pal.muted).child(hint)),
         )
 }
 

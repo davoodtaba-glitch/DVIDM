@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.71
+
+- **A cleaner Settings window:** options are grouped into General, Downloads, and Browser & network, and arranged in two columns so the page uses the available space.
+- Related options now sit together: appearance, language and font; startup, notifications and scrolling; connections and retries.
+- The default file-type list is shown on two lines.
+- Long Persian hints in Settings now wrap cleanly.
+- Rebuilt installer and portable package.
+
 ## 0.5.69
 
 - **Open folder:** opening a download's folder now selects the file in Windows Explorer when it exists.

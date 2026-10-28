@@ -1,5 +1,5 @@
-1acaa076aae8e7377203dddedac69618a3185cb842d1373dd415d0c453f475b1 *installer/DVIDM-Setup.msi
-fe4c0cbbc470cea753296c495c8b1fab458c5483eded2a3d82a6f4eec784ca11 *portable/DVIDM-Portable-0.5.69.zip
+34d1b34488b0895d9302ea68a81d8fd314583168260cc8933ddf0102c2f8f134 *installer/DVIDM-Setup.msi
+f53cff83a7dfedac616148ca335f90646a303315c3e6e8970d1ae3330c3042c2 *portable/DVIDM-Portable-0.5.71.zip
 8af337f26296efd5131bce2d26ce32abb7e3cc934b2d65f6d8521f786a4c3d9e *extension/DVIDM-chrome-extension.zip
 09ef2e5191353c721cd2425ee53da9620b0ca1af6e899d4220755f7ec089db59 *docs/USER-GUIDE.pdf
 4ec8cc0ff2069a86df7609336e99d3d0989f3cc629b365bc88365b9606e95113 *docs/USER-GUIDE.fa.pdf
