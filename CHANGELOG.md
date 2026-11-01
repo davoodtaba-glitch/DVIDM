@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.90
+
+- **Folder button fix:** for downloads whose names contain spaces, the folder button could open the Documents folder instead of the download folder. It now opens the right folder and selects the file.
+- Rebuilt installer and portable package.
+
 ## 0.5.89
 
 - **Floating downloads window:** keep an eye on active downloads in a compact always-on-top card. Pause or start each download from the card, expand it to see more, and double-click a row to open it in the main window.

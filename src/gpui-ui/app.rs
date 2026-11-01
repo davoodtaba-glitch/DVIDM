@@ -4412,8 +4412,15 @@ pub(crate) fn open_in_background(target: std::path::PathBuf, _cx: &mut App) {
 pub(crate) fn open_folder_selecting(file: std::path::PathBuf, _cx: &mut App) {
     std::thread::spawn(move || {
         let outcome = if file.exists() {
-            let arg = format!("/select,{}", file.to_string_lossy());
-            match std::process::Command::new("explorer.exe").arg(arg).spawn() {
+            // Explorer needs the quoted path to reach it unmodified: the
+            // standard argument quoting escapes the quotes, the switch is not
+            // recognised, and Explorer falls back to Documents.
+            use std::os::windows::process::CommandExt;
+            let arg = format!("/select,\"{}\"", file.to_string_lossy());
+            match std::process::Command::new("explorer.exe")
+                .raw_arg(arg)
+                .spawn()
+            {
                 Ok(_) => "ok".to_string(),
                 Err(e) => format!("failed: {e}"),
             }
