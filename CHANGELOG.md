@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.91
+
+- **Steady part count:** a running download keeps the parts it started with. Extra parts are no longer created during the transfer, so the Parts column stays fixed from start to finish, including after pausing and resuming.
+- Rebuilt installer and portable package.
+
 ## 0.5.90
 
 - **Folder button fix:** for downloads whose names contain spaces, the folder button could open the Documents folder instead of the download folder. It now opens the right folder and selects the file.
