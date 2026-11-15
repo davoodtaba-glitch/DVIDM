@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.92
+
+- **Full speed to the end:** when a part finishes, its connection now helps with the largest part still downloading, so speed no longer drops near the end of a large download. This only happens after a part actually completes, and parts smaller than 10 MB are left alone.
+- Rebuilt installer and portable package.
+
 ## 0.5.91
 
 - **Steady part count:** a running download keeps the parts it started with. Extra parts are no longer created during the transfer, so the Parts column stays fixed from start to finish, including after pausing and resuming.
